@@ -313,6 +313,9 @@ export default function PersonalFinanceDashboard() {
   const [expandedReview, setExpandedReview] = useState(null);
   const [showRebalance, setShowRebalance] = useState(false);
   const [cashflowMonth, setCashflowMonth] = useState(0);
+  const [showVoluntary, setShowVoluntary] = useState(false);
+  const [voluntaryAmount, setVoluntaryAmount] = useState('');
+  const [voluntaryAlloc, setVoluntaryAlloc] = useState<Record<string, string>>({});
   const [salaryConfirmDialog, setSalaryConfirmDialog] = useState(null);
   const [pacConfirmDialog, setPacConfirmDialog] = useState<{key: string; actual: string; excessAlloc: Record<string, string>} | null>(null);
   const [syncStatus, setSyncStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
@@ -642,8 +645,64 @@ export default function PersonalFinanceDashboard() {
     setToast({ message: 'Snapshot salvato', type: 'success' });
   };
 
+  // Auto-rebalance: sposta eccedenza dai livelli con cap a L4
+  const autoRebalanceOverflow = (wf: Record<string, number>, levels: typeof config.waterfallLevels) => {
+    const result = { ...wf };
+    const overflowLv = levels.find(l => l.cap === 0);
+    if (!overflowLv) return result;
+    for (const lv of levels) {
+      if (lv.cap <= 0) continue;
+      const excess = (result[lv.id] || 0) - lv.cap;
+      if (excess > 0) {
+        result[lv.id] = lv.cap;
+        result[overflowLv.id] = (result[overflowLv.id] || 0) + excess;
+      }
+    }
+    return result;
+  };
+
   const updateWaterfall = (id, val) => {
-    updateState({ waterfallCurrent: { ...state.waterfallCurrent, [id]: safeNum(val) } });
+    const newWf = { ...state.waterfallCurrent, [id]: safeNum(val) };
+    // Auto-sposta eccedenza in L4
+    const rebalanced = autoRebalanceOverflow(newWf, config.waterfallLevels);
+    updateState({ waterfallCurrent: rebalanced });
+  };
+
+  // Versamento volontario ETF
+  const applyVoluntaryInvestment = () => {
+    const amt = safeNum(voluntaryAmount);
+    if (amt <= 0) { setToast({ message: 'Importo non valido', type: 'error' }); return; }
+    const allocTotal = Object.values(voluntaryAlloc).reduce((s, v) => s + safeNum(v), 0);
+    if (Math.abs(allocTotal - amt) > 1) {
+      setToast({ message: `Alloca esattamente ${fmt(amt)} — attuale: ${fmt(allocTotal)}`, type: 'error' });
+      return;
+    }
+    const { newWf, movements, shortfall } = withdrawFromWaterfall(amt, state.waterfallCurrent, config.waterfallLevels);
+    if (shortfall > 0) {
+      setToast({ message: `Liquidità insufficiente. Mancano ${fmt(shortfall)}.`, type: 'error' });
+      return;
+    }
+    const newInstrumentValues = { ...(state.instrumentValues || {}) };
+    config.pac.instruments.forEach(ins => {
+      newInstrumentValues[ins.id] = (safeNum(newInstrumentValues[ins.id]) + safeNum(voluntaryAlloc[ins.id] || 0));
+    });
+    const tx = {
+      id: Date.now(), date: todayKey(), amount: amt,
+      type: 'expense', category: 'work',
+      note: `Versamento volontario ETF · ${Object.entries(voluntaryAlloc).filter(([,v]) => safeNum(v) > 0).map(([k, v]) => `${config.pac.instruments.find(i => i.id === k)?.name?.split(' ')[0] || k} ${fmt(safeNum(v))}`).join(', ')}`
+    };
+    updateState({
+      waterfallCurrent: newWf,
+      etfValue: state.etfValue + amt,
+      etfValueUpdatedAt: new Date().toISOString(),
+      instrumentValues: newInstrumentValues,
+      instrumentValuesUpdatedAt: new Date().toISOString(),
+      transactions: [tx, ...state.transactions].slice(0, 200),
+    });
+    setToast({ message: `Versamento volontario ${fmt(amt)} eseguito · +${fmt(amt)} su ETF`, type: 'success' });
+    setVoluntaryAmount('');
+    setVoluntaryAlloc({});
+    setShowVoluntary(false);
   };
 
   const addTransaction = () => {
@@ -1086,14 +1145,7 @@ export default function PersonalFinanceDashboard() {
                 }
               });
 
-              if (cd >= 28) {
-                const dayssinceLastSnap = state.snapshots.length > 0
-                  ? Math.floor((Date.now() - new Date(state.snapshots[state.snapshots.length - 1].date).getTime()) / 86400000)
-                  : 999;
-                if (dayssinceLastSnap >= 25) {
-                  actions.push({ priority: 3, icon: Save, color: 'slate', title: 'Salva snapshot mensile', desc: 'Fine mese — aggiorna ETF e Fon.Te. e salva uno snapshot per il tracking storico' });
-                }
-              }
+              // Snapshot automatico — nessun avviso manuale necessario
 
               if (cm === 4 && state.reviews.length === 0) {
                 actions.push({ priority: 3, icon: FileText, color: 'indigo', title: 'Revisione annuale 2026', desc: 'Documenta le decisioni strutturali fatte quest\'anno nella sezione Revisioni' });
@@ -1261,7 +1313,7 @@ export default function PersonalFinanceDashboard() {
                   {totalFixedExpenses > 0 && realMargin > 50 && (
                     <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 flex items-center gap-2 text-xs text-blue-800">
                       <Rocket size={13} className="text-blue-600 flex-shrink-0" />
-                      <span>Hai <strong>{fmt(realMargin)}</strong> di margine mensile — considera di aumentare il PAC di {fmt(Math.floor(realMargin / 50) * 50)}</span>
+                      <span>Margine teorico <strong>{fmt(realMargin)}</strong> — escluse spese variabili. Se hai liquidità in L4, valuta un versamento volontario una tantum invece di aumentare il PAC fisso</span>
                     </div>
                   )}
                   {totalFixedExpenses > 0 && realMargin < 0 && (
@@ -1293,9 +1345,18 @@ export default function PersonalFinanceDashboard() {
                 icon={Wallet}
                 accentColor="emerald"
                 action={
-                  <Button size="sm" icon={editWaterfall ? X : Edit3} onClick={() => setEditWaterfall(!editWaterfall)}>
-                    {editWaterfall ? 'Chiudi' : 'Modifica'}
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <Button size="sm" icon={Plus} variant="primary" onClick={() => {
+                      const init: Record<string, string> = {};
+                      config.pac.instruments.forEach(ins => { init[ins.id] = ''; });
+                      setVoluntaryAlloc(init);
+                      setVoluntaryAmount('');
+                      setShowVoluntary(true);
+                    }}>Versamento</Button>
+                    <Button size="sm" icon={editWaterfall ? X : Edit3} onClick={() => setEditWaterfall(!editWaterfall)}>
+                      {editWaterfall ? 'Chiudi' : 'Modifica'}
+                    </Button>
+                  </div>
                 }
               />
               <div className="px-5 pb-5 space-y-3">
@@ -1326,7 +1387,7 @@ export default function PersonalFinanceDashboard() {
                         <ProgressBar value={current} max={lv.cap || current} color={lv.color} showOverflow />
                         {over && (
                           <p className="text-[11px] text-amber-700 mt-1.5 flex items-center gap-1">
-                            <ChevronRight size={11} />Overflow {fmt(current - lv.cap)} → da spostare al Liv.4
+                            <ChevronRight size={11} />Overflow {fmt(current - lv.cap)} → spostato automaticamente in L4
                           </p>
                         )}
                         {i === 3 && current > 0 && (
@@ -2053,7 +2114,7 @@ export default function PersonalFinanceDashboard() {
             <div className="space-y-5">
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                 <StatCard label="Accumulo medio/mese" value={hasData ? fmt(avgMonthlyAccum) : 'N/D'}
-                  sub={hasData ? `Su ${timeFrameMonths.toFixed(1)} mesi di snapshot` : 'Servono ≥2 snapshot'}
+                  sub={hasData ? `Su ${timeFrameMonths.toFixed(1)} mesi tracciati` : 'Disponibile tra ~1 mese'}
                   accent="emerald" icon={ArrowUpRight} large />
                 <StatCard label="Tasso di risparmio" value={hasData ? `${savingsRate.toFixed(1)}%` : 'N/D'}
                   sub={hasData ? `vs ${fmt(avgIncome)}/mese di reddito` : ''}
@@ -2067,7 +2128,7 @@ export default function PersonalFinanceDashboard() {
 
               <Card>
                 <CardHeader title="Traiettoria reale vs proiezione Ponderata"
-                  subtitle={hasData ? `Delta corrente: ${currentDelta >= 0 ? '+' : ''}${fmt(currentDelta)} ${currentDelta >= 0 ? '— sopra modello' : '— sotto modello'}` : 'Servono ≥2 snapshot per il confronto'}
+                  subtitle={hasData ? `Delta corrente: ${currentDelta >= 0 ? '+' : ''}${fmt(currentDelta)} ${currentDelta >= 0 ? '— sopra modello' : '— sotto modello'}` : 'Il confronto sarà disponibile dopo il secondo mese di utilizzo'}
                   icon={Target} accentColor={hasData ? (currentDelta >= 0 ? 'emerald' : 'amber') : 'slate'} />
                 <div className="px-5 pb-5">
                   {hasData ? (
@@ -2083,8 +2144,8 @@ export default function PersonalFinanceDashboard() {
                       </LineChart>
                     </ResponsiveContainer>
                   ) : (
-                    <EmptyState icon={Target} title="Dati insufficienti"
-                      description="Salva snapshot del patrimonio nella Dashboard (almeno 2, suggerito uno al mese) per visualizzare l'andamento reale contro il modello FIRE Ponderato." />
+                    <EmptyState icon={Target} title="Grafico disponibile dal secondo mese"
+                      description="Il tracking automatico sta raccogliendo dati. Ogni mese la curva reale si aggiorna automaticamente — non devi fare nulla." />
                   )}
                 </div>
               </Card>
@@ -2534,13 +2595,45 @@ export default function PersonalFinanceDashboard() {
                   <Button onClick={exportData} variant="primary" icon={Download}>Esporta backup JSON</Button>
                   <Button onClick={() => fileInputRef.current?.click()} variant="secondary" icon={Upload}>Importa backup</Button>
                   <input ref={fileInputRef} type="file" accept=".json,application/json" onChange={importData} className="hidden" />
-                  <Button onClick={resetAll} variant="danger" icon={RotateCcw}>Reset completo</Button>
+                  <Button onClick={resetAll} variant="danger" icon={RotateCcw}>Reset dati</Button>
                 </div>
                 <div className="mt-3 bg-blue-50 border border-blue-200 rounded-lg p-3 flex items-start gap-2">
                   <Info size={14} className="text-blue-600 flex-shrink-0 mt-0.5" />
                   <p className="text-xs text-blue-900">
-                    I dati sono salvati localmente. Esporta periodicamente un backup JSON per sicurezza — soprattutto prima di modifiche importanti o reset.
+                    I dati sono salvati in cloud su Supabase (EU-West, Londra). Puoi esportarli in formato JSON in qualsiasi momento.
                   </p>
+                </div>
+              </div>
+            </Card>
+
+            <Card>
+              <CardHeader title="Privacy & Account" subtitle="Diritti GDPR e cancellazione account" icon={Shield} accentColor="slate" />
+              <div className="px-5 pb-5 space-y-3">
+                <div className="bg-slate-50 rounded-xl p-3 text-xs text-slate-600 space-y-1">
+                  <p>✅ I tuoi dati sono protetti da autenticazione e crittografia</p>
+                  <p>✅ Nessun altro utente può vedere i tuoi dati (Row Level Security)</p>
+                  <p>✅ Puoi esportare o eliminare i tuoi dati in qualsiasi momento</p>
+                  <p>⚠️ L'amministratore del servizio ha accesso tecnico al database (vedi Privacy Policy)</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="secondary" icon={FileText} onClick={() => {
+                    // Dispatch evento per aprire privacy policy in App.tsx
+                    window.dispatchEvent(new CustomEvent('show-privacy'));
+                  }}>Privacy Policy</Button>
+                  <Button variant="danger" icon={LogOut} onClick={() => {
+                    setConfirmDialog({
+                      title: 'Elimina account e dati',
+                      message: 'Verranno eliminati TUTTI i tuoi dati finanziari e il tuo account. Operazione irreversibile. Esporta un backup prima di procedere.',
+                      onConfirm: async () => {
+                        try {
+                          await window.storage.set('__delete__', '__delete__');
+                        } catch {}
+                        await supabase.from('user_data').delete().eq('user_id', (await supabase.auth.getUser()).data.user?.id || '');
+                        await supabase.auth.signOut();
+                        setConfirmDialog(null);
+                      },
+                    });
+                  }}>Elimina account</Button>
                 </div>
               </div>
             </Card>
@@ -2644,6 +2737,77 @@ export default function PersonalFinanceDashboard() {
       {/* Confirm dialog */}
       <ConfirmDialog open={!!confirmDialog} {...(confirmDialog || {})}
         onCancel={() => setConfirmDialog(null)} />
+
+      {/* ─── Versamento Volontario ETF ─── */}
+      {showVoluntary && (() => {
+        const amt = safeNum(voluntaryAmount);
+        const allocTotal = Object.values(voluntaryAlloc).reduce((s, v) => s + safeNum(v), 0);
+        const diff = amt - allocTotal;
+        const isValid = amt > 0 && Math.abs(diff) < 1;
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm" onClick={() => setShowVoluntary(false)}>
+            <div className="bg-white rounded-2xl border border-slate-200 max-w-md w-full p-5 shadow-xl" onClick={e => e.stopPropagation()}>
+              <div className="flex items-start justify-between mb-4">
+                <div>
+                  <h3 className="text-base font-semibold text-slate-900 flex items-center gap-2">
+                    <TrendingUp size={16} className="text-emerald-600" />Versamento volontario ETF
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">Preleva dalla liquidità e investi fuori dal PAC mensile</p>
+                </div>
+                <button onClick={() => setShowVoluntary(false)} className="text-slate-400 hover:text-slate-700"><X size={18} /></button>
+              </div>
+
+              <div className="mb-4">
+                <label className="text-xs font-medium text-slate-700 block mb-1.5">Importo da investire</label>
+                <MoneyInput size="lg" value={voluntaryAmount} onChange={v => {
+                  setVoluntaryAmount(v);
+                  // Reset allocazione quando cambia importo
+                  const init: Record<string, string> = {};
+                  config.pac.instruments.forEach(ins => { init[ins.id] = ''; });
+                  setVoluntaryAlloc(init);
+                }} />
+                {amt > 0 && totalLiq < amt && (
+                  <p className="text-[11px] text-rose-600 mt-1">Liquidità disponibile: {fmt(totalLiq)}</p>
+                )}
+              </div>
+
+              {amt > 0 && (
+                <div className="bg-slate-50 rounded-xl p-3 mb-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2">
+                    Dove hai investito? Alloca {fmt(amt)}
+                  </p>
+                  <div className="space-y-2">
+                    {config.pac.instruments.map(ins => (
+                      <div key={ins.id} className="flex items-center gap-2.5">
+                        <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: ins.color }} />
+                        <span className="text-sm text-slate-700 flex-1 truncate">{ins.name}</span>
+                        <MoneyInput size="sm" className="w-28"
+                          value={voluntaryAlloc[ins.id] || ''}
+                          onChange={v => setVoluntaryAlloc(prev => ({ ...prev, [ins.id]: v }))} />
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex justify-between text-[11px] pt-2 mt-1 border-t border-slate-200">
+                    <span className="text-slate-500">Totale allocato</span>
+                    <span className={`font-semibold tabular-nums ${Math.abs(diff) < 1 ? 'text-emerald-600' : 'text-amber-600'}`}>
+                      {fmt(allocTotal)} / {fmt(amt)}
+                      {allocTotal > 0 && Math.abs(diff) >= 1 && <span className="ml-1">(mancano {fmt(diff)})</span>}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2">
+                <Button variant="secondary" onClick={() => setShowVoluntary(false)}>Annulla</Button>
+                <Button variant="primary" icon={Check} disabled={!isValid || totalLiq < amt}
+                  onClick={applyVoluntaryInvestment}>
+                  Investi {amt > 0 ? fmt(amt) : ''}
+                </Button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ─── PAC Confirm Modal ─── */}
       {pacConfirmDialog && (() => {

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { supabase, storage } from './supabase'
 import type { Session } from '@supabase/supabase-js'
 import PersonalFinanceDashboard from './PersonalFinanceDashboard'
+import PrivacyPolicy from './PrivacyPolicy'
 import { Wallet, Lock, Mail, Loader2, Eye, EyeOff, UserPlus, ArrowLeft, CheckCircle2 } from 'lucide-react'
 
 ;(window as any).storage = storage
@@ -20,6 +21,14 @@ export default function App() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [info, setInfo] = useState('')
+  const [privacyAccepted, setPrivacyAccepted] = useState(false)
+  const [showPrivacy, setShowPrivacy] = useState(false)
+
+  useEffect(() => {
+    const handler = () => setShowPrivacy(true);
+    window.addEventListener('show-privacy', handler);
+    return () => window.removeEventListener('show-privacy', handler);
+  }, []);
 
   useEffect(() => {
     const hash = window.location.hash
@@ -85,9 +94,16 @@ export default function App() {
     </div>
   )
 
-  if (session) return <PersonalFinanceDashboard />
+  if (session) return (
+    <>
+      <PersonalFinanceDashboard />
+      {showPrivacy && <PrivacyPolicy onClose={() => setShowPrivacy(false)} />}
+    </>
+  )
 
   return (
+    <>
+    {showPrivacy && <PrivacyPolicy onClose={() => setShowPrivacy(false)} />}
     <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm w-full max-w-sm p-8">
 
@@ -163,8 +179,21 @@ export default function App() {
                 placeholder="••••••••••"
                 className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white" />
             </div>
+            <div className="flex items-start gap-2">
+              <input type="checkbox" id="privacy" checked={privacyAccepted}
+                onChange={e => setPrivacyAccepted(e.target.checked)}
+                className="mt-0.5 accent-emerald-600 flex-shrink-0" />
+              <label htmlFor="privacy" className="text-xs text-slate-600">
+                Ho letto e accetto la{' '}
+                <button type="button" onClick={() => setShowPrivacy(true)}
+                  className="text-emerald-600 hover:underline font-medium">
+                  Privacy Policy
+                </button>
+                . Comprendo che i miei dati finanziari sono memorizzati in cloud.
+              </label>
+            </div>
             {error && <p className="text-xs text-rose-600 font-medium">{error}</p>}
-            <button type="submit" disabled={busy}
+            <button type="submit" disabled={busy || !privacyAccepted}
               className="w-full py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-60 flex items-center justify-center gap-2">
               {busy ? <Loader2 size={15} className="animate-spin" /> : <UserPlus size={15} />}
               {busy ? 'Registrazione...' : 'Crea account'}
@@ -208,6 +237,16 @@ export default function App() {
           </div>
         )}
 
+        {/* Link privacy nel footer */}
+        {(screen === 'login' || screen === 'signup') && (
+          <p className="text-[11px] text-slate-400 text-center mt-4">
+            <button onClick={() => setShowPrivacy(true)} className="hover:text-emerald-600 hover:underline">
+              Privacy Policy
+            </button>
+            {' · '}I tuoi dati sono protetti e cifrati
+          </p>
+        )}
+
         {screen === 'reset' && (
           <form onSubmit={handleReset} className="space-y-4">
             <h2 className="text-sm font-semibold text-slate-800 mb-4">Nuova password</h2>
@@ -234,5 +273,6 @@ export default function App() {
 
       </div>
     </div>
+    </>
   )
 }
