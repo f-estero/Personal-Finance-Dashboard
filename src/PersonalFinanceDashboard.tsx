@@ -10,7 +10,7 @@ import {
   Plus, Trash2, Download, Upload, RotateCcw, LayoutDashboard,
   ChevronRight, ChevronDown, Sparkles, Briefcase, ChevronLeft,
   CreditCard, Shield, Coffee, Zap, Rocket, Save, X, Info,
-  Edit3, Check, ArrowUpRight, FileText, Hash, LogOut
+  Edit3, Check, ArrowUpRight, FileText, Hash, LogOut, Home, Tv, Phone
 } from 'lucide-react';
 
 // ═══════════════════════════════════════════════════════════
@@ -25,34 +25,38 @@ const MONTHS_IT = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Lugl
 const MONTHS_IT_SHORT = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','Ott','Nov','Dic'];
 
 const DEFAULT_CONFIG = {
-  profile: { name: 'Francesco', birthYear: 1994 },
-  salary: { netAmount: 1700, bonusAmount: 1750, bonusMonths: [5, 11], payDay: 27 },
+  profile: { name: '', birthYear: new Date().getFullYear() - 30 },
+  salary: { netAmount: 0, bonusAmount: 0, bonusMonths: [], payDay: 27 },
   pac: {
-    monthlyAmount: 1000, payDay: 4, broker: 'Scalable Capital',
+    monthlyAmount: 0, payDay: 1, broker: '',
     instruments: [
-      { id: 'sp500', name: 'Vanguard S&P 500',          pct: 45, ter: 0.07, color: '#3b82f6' },
-      { id: 'world', name: 'iShares MSCI World ex-USA', pct: 35, ter: 0.15, color: '#8b5cf6' },
-      { id: 'em',    name: 'Xtrackers MSCI EM',         pct: 15, ter: 0.18, color: '#f59e0b' },
-      { id: 'gold',  name: 'iShares Physical Gold',     pct: 5,  ter: 0.12, color: '#f97316' },
+      { id: 'ins1', name: 'ETF 1', pct: 100, ter: 0.20, color: '#3b82f6' },
     ]
   },
-  fonte: { monthlyContribution: 324, ter: 0.1894, comparto: 'Dinamico' },
+  fonte: { monthlyContribution: 0, ter: 0, comparto: '' },
+  expenses: {
+    affitto:       { amount: 0, label: 'Affitto',       icon: 'home'    },
+    utenze:        { amount: 0, label: 'Utenze',        icon: 'zap'     },
+    abbonamenti:   { amount: 0, label: 'Abbonamenti',   icon: 'tv'      },
+    assicurazioni: { amount: 0, label: 'Assicurazioni', icon: 'shield'  },
+    telefono:      { amount: 0, label: 'Telefono',      icon: 'phone'   },
+  },
   waterfallLevels: [
-    { id: 'l1', name: 'Buffer di Sicurezza',      desc: 'Imprevisti non assicurabili', cap: 5000, color: '#10b981', icon: 'shield' },
-    { id: 'l2', name: 'Lifestyle / Smartworking', desc: 'Canarie, viaggi, trasferte',  cap: 2500, color: '#3b82f6', icon: 'coffee' },
-    { id: 'l3', name: 'Liquidità Operativa',      desc: 'Transato mensile + SDD',     cap: 1500, color: '#f59e0b', icon: 'zap' },
-    { id: 'l4', name: 'Overflow → Mercato',       desc: 'DCA tattico S&P 500',         cap: 0,    color: '#6366f1', icon: 'rocket' },
+    { id: 'l1', name: 'Riserva di Emergenza',  desc: 'Imprevisti e spese straordinarie', cap: 0, color: '#10b981', icon: 'shield' },
+    { id: 'l2', name: 'Fondo Lifestyle',       desc: 'Viaggi, svago, spese voluttuarie',  cap: 0, color: '#3b82f6', icon: 'coffee' },
+    { id: 'l3', name: 'Liquidità Operativa',   desc: 'Spese mensili correnti',            cap: 0, color: '#f59e0b', icon: 'zap' },
+    { id: 'l4', name: 'Overflow → Investimenti', desc: 'Eccedenza da investire',          cap: 0, color: '#6366f1', icon: 'rocket' },
   ],
 };
 
 const DEFAULT_STATE = {
-  etfValue: 17536,
+  etfValue: 0,
   etfValueUpdatedAt: null,
-  fonteValue: 6889,
+  fonteValue: 0,
   fonteValueUpdatedAt: null,
   instrumentValues: {},
   instrumentValuesUpdatedAt: null,
-  waterfallCurrent: { l1: 5000, l2: 2500, l3: 1460, l4: 2500 },
+  waterfallCurrent: { l1: 0, l2: 0, l3: 0, l4: 0 },
   events: {},
   ledger: {},
   snapshots: [],
@@ -61,16 +65,10 @@ const DEFAULT_STATE = {
   fireParams: { rate: 5.0, fonteRate: 3.0, retireAge: 50 },
 };
 
-const MILESTONES = [
-  { year: 2027, age: 33, label: 'Primo benchmark annuale',       pacT: 31000,  fonteT: 11000,  note: 'Verifica allocation post-cambio comparto' },
-  { year: 2029, age: 35, label: 'Patrimonio investito > €80k',   pacT: 60000,  fonteT: 20000,  note: 'Top 5–10% coetanei per patrimonio netto' },
-  { year: 2031, age: 37, label: 'PAC > €90k',                     pacT: 92000,  fonteT: 29000,  note: 'Rivalutare surplus da destinare al PAC' },
-  { year: 2034, age: 40, label: 'Patrimonio investito > €190k',  pacT: 147000, fonteT: 45000,  note: 'Prima simulazione FIRE con dati reali' },
-  { year: 2037, age: 43, label: 'Patrimonio investito > €270k',  pacT: 211000, fonteT: 61000,  note: 'Valutare glide path verso allocazione meno aggressiva' },
-  { year: 2040, age: 46, label: 'Patrimonio investito > €365k',  pacT: 288000, fonteT: 80000,  note: 'Pianificazione concreta scenario 50 anni' },
-  { year: 2044, age: 50, label: 'TARGET FIRE — Ritiro a 50',     pacT: 406000, fonteT: 108000, note: 'Rendita ponte ~€1.350/mese · SWR 4%', isTarget: true },
-  { year: 2049, age: 55, label: 'TARGET FIRE — Ritiro a 55',     pacT: 601000, fonteT: 149000, note: 'Rendita ponte ~€2.000/mese · SWR 4%', isTarget: true },
-];
+// Milestones calcolate dinamicamente in base all'età e agli obiettivi dell'utente
+type Milestone = { year: number; age: number; label: string; pacT: number; fonteT: number; note: string; isTarget?: boolean };
+
+// Le milestone vengono generate dinamicamente nel componente tramite useMemo
 
 const WF_ICON_MAP = { shield: Shield, coffee: Coffee, zap: Zap, rocket: Rocket };
 
@@ -316,6 +314,18 @@ export default function PersonalFinanceDashboard() {
   const [showRebalance, setShowRebalance] = useState(false);
   const [cashflowMonth, setCashflowMonth] = useState(0);
   const [salaryConfirmDialog, setSalaryConfirmDialog] = useState(null);
+  const [pacConfirmDialog, setPacConfirmDialog] = useState<{key: string; actual: string; excessAlloc: Record<string, string>} | null>(null);
+  const [syncStatus, setSyncStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [onboardingStep, setOnboardingStep] = useState(0);
+  const [obName, setObName] = useState('');
+  const [obYear, setObYear] = useState(String(new Date().getFullYear() - 30));
+  const [obSalary, setObSalary] = useState('');
+  const [obPac, setObPac] = useState('');
+  const [obRetireAge, setObRetireAge] = useState('50');
+  const [obMonthlyExpense, setObMonthlyExpense] = useState('');
+  const [obReturnRate, setObReturnRate] = useState('5.0');
+  const [showFireWizard, setShowFireWizard] = useState(false);
   const fileInputRef = useRef(null);
 
   // ─── Load & migrate ───
@@ -355,14 +365,71 @@ export default function PersonalFinanceDashboard() {
     })();
   }, []);
 
+  // ─── Mostra onboarding ai nuovi utenti ───
+  useEffect(() => {
+    if (loaded && !config.profile.name) {
+      setShowOnboarding(true);
+    }
+  }, [loaded]);
+
+  // ─── Auto-snapshot mensile ───
+  // Ogni volta che l'app si apre, se non esiste già uno snapshot
+  // del mese corrente e l'utente ha dati significativi, lo salva automaticamente.
+  useEffect(() => {
+    if (!loaded || !config.profile.name) return;
+    if (state.etfValue <= 0 && state.fonteValue <= 0) return; // nessun dato ancora
+
+    const today = todayKey();
+    const currentMonthPrefix = today.substring(0, 7); // es. "2026-05"
+    const alreadyThisMonth = state.snapshots.some(s => s.date.startsWith(currentMonthPrefix));
+
+    if (!alreadyThisMonth) {
+      const liq = Object.values(state.waterfallCurrent).reduce((a: number, b) => a + (b as number || 0), 0);
+      const nw = state.etfValue + state.fonteValue + liq;
+      const snap = { date: today, etf: state.etfValue, fonte: state.fonteValue, liq, nw };
+      const newSnaps = [...state.snapshots.filter(s => s.date !== today), snap]
+        .sort((a, b) => a.date.localeCompare(b.date))
+        .slice(-60);
+      updateState({ snapshots: newSnaps });
+      // Nessun toast — operazione silenziosa
+    }
+  }, [loaded, config.profile.name]);
+
+  const completeOnboarding = () => {
+    if (!obName.trim()) return;
+    const retireAge = parseInt(obRetireAge) || 50;
+    const rate = parseFloat(obReturnRate) || 5.0;
+    setConfig(c => ({
+      ...c,
+      profile: { name: obName.trim(), birthYear: parseInt(obYear) || new Date().getFullYear() - 30 },
+      salary: { ...c.salary, netAmount: safeNum(obSalary) },
+      pac: { ...c.pac, monthlyAmount: safeNum(obPac) },
+    }));
+    updateState({ fireParams: { rate, fonteRate: rate - 2 > 0 ? rate - 2 : 2, retireAge } });
+    setShowOnboarding(false);
+    setToast({ message: `Benvenuto ${obName.trim()}! Completa la configurazione nelle Impostazioni.`, type: 'success' });
+  };
+
+  const applyFireWizard = () => {
+    const retireAge = parseInt(obRetireAge) || 50;
+    const rate = parseFloat(obReturnRate) || 5.0;
+    updateState({ fireParams: { rate, fonteRate: rate - 2 > 0 ? rate - 2 : 2, retireAge } });
+    setShowFireWizard(false);
+    setToast({ message: 'Obiettivo FIRE aggiornato', type: 'success' });
+  };
+
   // ─── Auto-save (debounced) ───
   useEffect(() => {
     if (!loaded) return;
     const t = setTimeout(async () => {
       try {
+        setSyncStatus('saving');
         await window.storage.set(STORAGE_KEY, JSON.stringify({ version: APP_VERSION, config, state }));
+        setSyncStatus('saved');
+        setTimeout(() => setSyncStatus('idle'), 2000);
       } catch (err) {
-        setToast({ message: 'Errore salvataggio', type: 'error' });
+        setSyncStatus('error');
+        setToast({ message: 'Errore salvataggio cloud', type: 'error' });
       }
     }, 600);
     return () => clearTimeout(t);
@@ -397,6 +464,14 @@ export default function PersonalFinanceDashboard() {
   const totalLiq = useMemo(() => Object.values(state.waterfallCurrent).reduce((a, b) => a + (b || 0), 0), [state.waterfallCurrent]);
   const totalInv = state.etfValue + state.fonteValue;
   const netWorth = totalInv + totalLiq;
+
+  // ─── Spese fisse ───
+  const EXPENSE_ICONS = { home: Home, zap: Zap, tv: Tv, shield: Shield, phone: Phone };
+  const totalFixedExpenses = useMemo(() =>
+    Object.values(config.expenses || {}).reduce((s, e: any) => s + safeNum(e.amount), 0),
+  [config.expenses]);
+  const realDisposable = currentSalary - totalFixedExpenses; // dopo spese fisse
+  const realMargin = realDisposable - config.pac.monthlyAmount; // dopo PAC
 
   // Recent snapshot delta
   const prevSnap = state.snapshots.length > 0 ? state.snapshots[state.snapshots.length - 1] : null;
@@ -477,22 +552,42 @@ export default function PersonalFinanceDashboard() {
     setSalaryConfirmDialog(null);
   };
 
-  const applyPacConfirm = (eventKey) => {
-    const amt = config.pac.monthlyAmount;
-    const { newWf, movements, shortfall } = withdrawFromWaterfall(amt, state.waterfallCurrent, config.waterfallLevels);
+  const applyPacConfirm = (eventKey, actualAmount: number, excessAlloc: Record<string, number> = {}) => {
+    if (actualAmount <= 0) { setToast({ message: 'Importo non valido', type: 'error' }); return; }
+    const { newWf, movements, shortfall } = withdrawFromWaterfall(actualAmount, state.waterfallCurrent, config.waterfallLevels);
     if (shortfall > 0) {
-      setToast({ message: `Liquidità insufficiente per PAC (${fmt(amt)}). Mancano ${fmt(shortfall)}.`, type: 'error' });
+      setToast({ message: `Liquidità insufficiente per PAC (${fmt(actualAmount)}). Mancano ${fmt(shortfall)}.`, type: 'error' });
       return;
     }
-    const entry = { type: 'pac_out', amount: amt, movements, etfDelta: amt, appliedAt: new Date().toISOString() };
+    // Aggiorna i valori per-strumento: base proporzionale + eccedenza esplicita
+    const baseAmt = Math.min(actualAmount, config.pac.monthlyAmount);
+    const excess = actualAmount - baseAmt;
+    const newInstrumentValues = { ...(state.instrumentValues || {}) };
+    config.pac.instruments.forEach(ins => {
+      const baseShare = baseAmt * ins.pct / 100;
+      const excessShare = excessAlloc[ins.id] || 0;
+      newInstrumentValues[ins.id] = (safeNum(newInstrumentValues[ins.id]) + baseShare + excessShare);
+    });
+
+    const entry = {
+      type: 'pac_out', amount: actualAmount, movements,
+      etfDelta: actualAmount,
+      baseAmount: baseAmt, excess,
+      excessAlloc,
+      appliedAt: new Date().toISOString()
+    };
     updateState({
       events: { ...state.events, [eventKey]: 'done' },
       ledger: { ...state.ledger, [eventKey]: entry },
       waterfallCurrent: newWf,
-      etfValue: state.etfValue + amt,
+      etfValue: state.etfValue + actualAmount,
       etfValueUpdatedAt: new Date().toISOString(),
+      instrumentValues: newInstrumentValues,
+      instrumentValuesUpdatedAt: new Date().toISOString(),
     });
-    setToast({ message: `PAC ${fmt(amt)} eseguito · +${fmt(amt)} su ETF`, type: 'success' });
+    const excessMsg = excess > 0 ? ` · ${fmt(excess)} extra fuori piano` : '';
+    setToast({ message: `PAC ${fmt(actualAmount)} eseguito · +${fmt(actualAmount)} su ETF${excessMsg}`, type: 'success' });
+    setPacConfirmDialog(null);
   };
 
   const revertEvent = (eventKey) => {
@@ -533,7 +628,9 @@ export default function PersonalFinanceDashboard() {
     if (state.events[eventKey] === 'done') {
       revertEvent(eventKey);
     } else {
-      applyPacConfirm(eventKey);
+      const initExcess: Record<string, string> = {};
+      config.pac.instruments.forEach(ins => { initExcess[ins.id] = ''; });
+      setPacConfirmDialog({ key: eventKey, actual: String(config.pac.monthlyAmount), excessAlloc: initExcess });
     }
   };
 
@@ -672,6 +769,69 @@ export default function PersonalFinanceDashboard() {
     return rows;
   }, [state.events, config, cy, cm]);
 
+  // ─── Milestone auto-generate ───
+  const MILESTONES = useMemo((): Milestone[] => {
+    const currentAge = ageFromYear(config.profile.birthYear);
+    const currentYear = cy;
+    const targetAge = state.fireParams.retireAge;
+    const rate = state.fireParams.rate;
+    const fonteRate = state.fireParams.fonteRate;
+    const pac = config.pac.monthlyAmount;
+    const fonte = config.fonte.monthlyContribution;
+
+    if (!config.profile.name || pac <= 0) return [];
+
+    const milestones: Milestone[] = [];
+
+    // Step ogni 5 anni da ora+5 fino a targetAge-1
+    const startAge = Math.ceil((currentAge + 3) / 5) * 5;
+    for (let age = startAge; age < targetAge; age += 5) {
+      const years = age - currentAge;
+      if (years <= 0) continue;
+      const mo = years * 12;
+      const pacVal = calcFV(state.etfValue, pac, rate, mo);
+      const fonteVal = calcFV(state.fonteValue, fonte, fonteRate, mo);
+      const swr = Math.round(pacVal * 0.04 / 12);
+      milestones.push({
+        year: currentYear + years, age,
+        label: `Patrimonio a ${age} anni`,
+        pacT: Math.round(pacVal), fonteT: Math.round(fonteVal),
+        note: swr > 0 ? `Rendita stimata ~${fmt(swr)}/mese · SWR 4%` : `Proiezione al ${rate}% reale`,
+      });
+    }
+
+    // Target principale FIRE
+    const targetYears = targetAge - currentAge;
+    if (targetYears > 0) {
+      const tPac = calcFV(state.etfValue, pac, rate, targetYears * 12);
+      const tFonte = calcFV(state.fonteValue, fonte, fonteRate, targetYears * 12);
+      milestones.push({
+        year: currentYear + targetYears, age: targetAge,
+        label: `TARGET FIRE — Ritiro a ${targetAge}`,
+        pacT: Math.round(tPac), fonteT: Math.round(tFonte),
+        note: `Rendita ~${fmt(Math.round(tPac * 0.04 / 12))}/mese · SWR 4%`,
+        isTarget: true,
+      });
+    }
+
+    // Target secondario +5 anni
+    const age2 = targetAge + 5;
+    const years2 = age2 - currentAge;
+    if (years2 > 0) {
+      const p2 = calcFV(state.etfValue, pac, rate, years2 * 12);
+      const f2 = calcFV(state.fonteValue, fonte, fonteRate, years2 * 12);
+      milestones.push({
+        year: currentYear + years2, age: age2,
+        label: `TARGET FIRE — Ritiro a ${age2}`,
+        pacT: Math.round(p2), fonteT: Math.round(f2),
+        note: `Rendita ~${fmt(Math.round(p2 * 0.04 / 12))}/mese · SWR 4%`,
+        isTarget: true,
+      });
+    }
+
+    return milestones;
+  }, [config, state.etfValue, state.fonteValue, state.fireParams, cy]);
+
   // ─── Tabs ───
   const TABS = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -698,6 +858,126 @@ export default function PersonalFinanceDashboard() {
   const pacEvent = getEventStatus(pacKey, config.pac.payDay);
   const salEvent = getEventStatus(salKey, config.salary.payDay);
 
+  // ─── ONBOARDING MODAL ───
+  if (showOnboarding) {
+    const steps = [
+      { title: 'Il tuo profilo', subtitle: 'Come ti chiami e quando sei nato?' },
+      { title: 'Stipendio & PAC', subtitle: 'Quanto guadagni e quanto investi ogni mese?' },
+      { title: 'Obiettivo FIRE', subtitle: 'A che età vuoi raggiungere l\'indipendenza finanziaria?' },
+    ];
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm w-full max-w-md p-8">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-10 h-10 bg-gradient-to-br from-emerald-500 to-emerald-700 rounded-xl flex items-center justify-center text-white">
+              <Wallet size={20} strokeWidth={2.2} />
+            </div>
+            <div>
+              <h1 className="text-base font-semibold text-slate-900">Finance Personal Dashboard</h1>
+              <p className="text-xs text-slate-500">Configurazione iniziale — Step {onboardingStep + 1} di {steps.length}</p>
+            </div>
+          </div>
+          <div className="flex gap-1.5 mb-6">
+            {steps.map((_, i) => (
+              <div key={i} className={`h-1 flex-1 rounded-full transition-colors ${i <= onboardingStep ? 'bg-emerald-500' : 'bg-slate-200'}`} />
+            ))}
+          </div>
+          <h2 className="text-sm font-semibold text-slate-900 mb-0.5">{steps[onboardingStep].title}</h2>
+          <p className="text-xs text-slate-500 mb-5">{steps[onboardingStep].subtitle}</p>
+          {onboardingStep === 0 && (
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs font-medium text-slate-700 block mb-1.5">Nome</label>
+                <input type="text" value={obName} onChange={e => setObName(e.target.value)}
+                  placeholder="es. Mario"
+                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-700 block mb-1.5">Anno di nascita</label>
+                <input type="number" value={obYear} onChange={e => setObYear(e.target.value)}
+                  min={1950} max={2010}
+                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white" />
+              </div>
+              <button onClick={() => obName.trim() && setOnboardingStep(1)} disabled={!obName.trim()}
+                className="w-full py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-50 flex items-center justify-center gap-2 mt-2">
+                Continua <ChevronRight size={15} />
+              </button>
+            </div>
+          )}
+          {onboardingStep === 1 && (
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs font-medium text-slate-700 block mb-1.5">Stipendio netto mensile (€)</label>
+                <input type="number" value={obSalary} onChange={e => setObSalary(e.target.value)}
+                  placeholder="es. 2000" min={0}
+                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-700 block mb-1.5">Investimento mensile PAC (€)</label>
+                <input type="number" value={obPac} onChange={e => setObPac(e.target.value)}
+                  placeholder="es. 500" min={0}
+                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white" />
+              </div>
+              <p className="text-[11px] text-slate-400">Puoi modificare tutto nelle Impostazioni in qualsiasi momento.</p>
+              <div className="flex gap-2 mt-2">
+                <button onClick={() => setOnboardingStep(0)}
+                  className="flex-1 py-2 border border-slate-200 text-slate-700 text-sm font-medium rounded-lg hover:bg-slate-50 flex items-center justify-center gap-1">
+                  <ChevronLeft size={15} />Indietro
+                </button>
+                <button onClick={() => setOnboardingStep(2)}
+                  className="flex-1 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 flex items-center justify-center gap-1">
+                  Continua <ChevronRight size={15} />
+                </button>
+              </div>
+            </div>
+          )}
+          {onboardingStep === 2 && (
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs font-medium text-slate-700 block mb-1.5">Età target per il FIRE</label>
+                <input type="number" value={obRetireAge} onChange={e => setObRetireAge(e.target.value)}
+                  min={30} max={70} placeholder="es. 50"
+                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white" />
+                <p className="text-[11px] text-slate-400 mt-1">L'età in cui vuoi smettere di lavorare</p>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-700 block mb-1.5">Rendimento annuo atteso (%)</label>
+                <input type="number" value={obReturnRate} onChange={e => setObReturnRate(e.target.value)}
+                  min={1} max={12} step={0.5} placeholder="es. 5"
+                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white" />
+                <p className="text-[11px] text-slate-400 mt-1">Tasso reale storico S&P 500 ≈ 7%, prudente ≈ 5%</p>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-700 block mb-1.5">Rendita mensile desiderata (€)</label>
+                <input type="number" value={obMonthlyExpense} onChange={e => setObMonthlyExpense(e.target.value)}
+                  placeholder="es. 2000" min={0}
+                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white" />
+                {obMonthlyExpense && (
+                  <p className="text-[11px] text-emerald-600 mt-1 font-medium">
+                    FIRE number stimato: {fmt(safeNum(obMonthlyExpense) * 12 / 0.04)} (SWR 4%)
+                  </p>
+                )}
+              </div>
+              <div className="flex gap-2 mt-2">
+                <button onClick={() => setOnboardingStep(1)}
+                  className="flex-1 py-2 border border-slate-200 text-slate-700 text-sm font-medium rounded-lg hover:bg-slate-50 flex items-center justify-center gap-1">
+                  <ChevronLeft size={15} />Indietro
+                </button>
+                <button onClick={completeOnboarding}
+                  className="flex-1 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 flex items-center justify-center gap-1">
+                  <Check size={15} />Inizia
+                </button>
+              </div>
+            </div>
+          )}
+          <button onClick={() => setShowOnboarding(false)} className="text-[11px] text-slate-400 hover:text-slate-600 mt-4 block mx-auto">
+            Salta — configuro tutto manualmente
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50" style={{ fontFamily: 'ui-sans-serif, system-ui, -apple-system, sans-serif' }}>
       {/* ═══════════ HEADER ═══════════ */}
@@ -708,11 +988,19 @@ export default function PersonalFinanceDashboard() {
               <Wallet size={18} strokeWidth={2.2} />
             </div>
             <div>
-              <h1 className="text-base font-semibold text-slate-900 leading-tight">Personal Finance</h1>
+              <h1 className="text-base font-semibold text-slate-900 leading-tight">Finance Personal Dashboard</h1>
               <p className="text-xs text-slate-500 leading-tight">
                 {config.profile.name} · {ageFromYear(config.profile.birthYear)} anni · v{APP_VERSION}
               </p>
             </div>
+          </div>
+          {/* Cloud sync indicator */}
+          <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-[11px] font-medium"
+            title="I tuoi dati sono salvati in cloud — sicuri da qualsiasi aggiornamento">
+            {syncStatus === 'saving' && <><div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" /><span className="text-amber-600 hidden sm:inline">Salvataggio...</span></>}
+            {syncStatus === 'saved' && <><div className="w-2 h-2 rounded-full bg-emerald-500" /><span className="text-emerald-600 hidden sm:inline">Salvato in cloud</span></>}
+            {syncStatus === 'error' && <><div className="w-2 h-2 rounded-full bg-rose-500" /><span className="text-rose-600 hidden sm:inline">Errore sync</span></>}
+            {syncStatus === 'idle' && <><div className="w-2 h-2 rounded-full bg-emerald-400" /><span className="text-slate-400 hidden sm:inline">Cloud sync attivo</span></>}
           </div>
           <button
             onClick={() => supabase.auth.signOut()}
@@ -879,7 +1167,7 @@ export default function PersonalFinanceDashboard() {
                 action={
                   <div className="flex items-center gap-2">
                     {isBonusMonth && <Badge color="amber" icon={Sparkles}>Mese bonus</Badge>}
-                    <Button onClick={saveSnapshot} size="sm" icon={Save}>Snapshot</Button>
+                    <Badge color="emerald" icon={Save}>Auto-snapshot attivo</Badge>
                   </div>
                 }
               />
@@ -947,19 +1235,44 @@ export default function PersonalFinanceDashboard() {
                 </div>
 
                 {/* Summary */}
-                <div className="grid grid-cols-3 gap-3 pt-4 border-t border-slate-100">
-                  <div className="text-center">
-                    <div className="text-lg font-semibold text-emerald-700 tabular-nums">{fmt(currentSalary)}</div>
-                    <div className="text-[11px] text-slate-500">Entrata attesa</div>
+                <div className="border-t border-slate-100 pt-4 space-y-3">
+                  {/* Riga principale */}
+                  <div className="grid grid-cols-4 gap-2">
+                    <div className="text-center">
+                      <div className="text-base font-semibold text-emerald-700 tabular-nums">{fmt(currentSalary)}</div>
+                      <div className="text-[10px] text-slate-500">Stipendio</div>
+                    </div>
+                    <div className="text-center">
+                      <div className="text-base font-semibold text-rose-600 tabular-nums">−{fmt(totalFixedExpenses)}</div>
+                      <div className="text-[10px] text-slate-500">Spese fisse</div>
+                    </div>
+                    <div className="text-center">
+                      <div className="text-base font-semibold text-indigo-600 tabular-nums">−{fmt(config.pac.monthlyAmount)}</div>
+                      <div className="text-[10px] text-slate-500">PAC</div>
+                    </div>
+                    <div className="text-center">
+                      <div className={`text-base font-semibold tabular-nums ${realMargin >= 0 ? 'text-blue-700' : 'text-amber-600'}`}>
+                        {realMargin >= 0 ? '+' : ''}{fmt(realMargin)}
+                      </div>
+                      <div className="text-[10px] text-slate-500">Margine reale</div>
+                    </div>
                   </div>
-                  <div className="text-center">
-                    <div className="text-lg font-semibold text-rose-700 tabular-nums">{fmt(config.pac.monthlyAmount)}</div>
-                    <div className="text-[11px] text-slate-500">PAC uscente</div>
-                  </div>
-                  <div className="text-center">
-                    <div className="text-lg font-semibold text-blue-700 tabular-nums">{fmt(currentSalary - config.pac.monthlyAmount)}</div>
-                    <div className="text-[11px] text-slate-500">Disponibile netto</div>
-                  </div>
+                  {/* Alert margine */}
+                  {totalFixedExpenses > 0 && realMargin > 50 && (
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 flex items-center gap-2 text-xs text-blue-800">
+                      <Rocket size={13} className="text-blue-600 flex-shrink-0" />
+                      <span>Hai <strong>{fmt(realMargin)}</strong> di margine mensile — considera di aumentare il PAC di {fmt(Math.floor(realMargin / 50) * 50)}</span>
+                    </div>
+                  )}
+                  {totalFixedExpenses > 0 && realMargin < 0 && (
+                    <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 flex items-center gap-2 text-xs text-amber-800">
+                      <AlertCircle size={13} className="text-amber-600 flex-shrink-0" />
+                      <span>Il PAC supera il margine disponibile di <strong>{fmt(Math.abs(realMargin))}</strong> — verifica le spese o riduci il PAC</span>
+                    </div>
+                  )}
+                  {totalFixedExpenses === 0 && (
+                    <p className="text-[11px] text-slate-400 text-center">Configura le spese fisse in Impostazioni per vedere il margine reale</p>
+                  )}
                 </div>
 
                 {/* Next month preview */}
@@ -1426,7 +1739,7 @@ export default function PersonalFinanceDashboard() {
           const isCurrentMonth = cashflowMonth === 0;
           const isFuture = cashflowMonth > 0;
           const projTotalIn = targetSalary + extraIncome;
-          const projTotalOut = config.pac.monthlyAmount + extraExpense;
+          const projTotalOut = config.pac.monthlyAmount + totalFixedExpenses + extraExpense;
           const projNetFlow = projTotalIn - projTotalOut;
 
           return (
@@ -1661,7 +1974,7 @@ export default function PersonalFinanceDashboard() {
               <CardHeader title="Cronologia snapshot" subtitle={`${state.snapshots.length} registrazioni`} icon={Save} accentColor="emerald" />
               <div className="px-5 pb-5">
                 {state.snapshots.length === 0 ? (
-                  <EmptyState icon={Save} title="Nessuno snapshot salvato" description="Clicca 'Snapshot' nella dashboard per registrare il valore corrente del patrimonio. Suggerito: una volta al mese." />
+                  <EmptyState icon={Save} title="Nessuno snapshot ancora" description="Il primo snapshot viene salvato automaticamente alla prossima apertura dell'app, una volta che hai inserito i tuoi dati." />
                 ) : (
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm" style={{ minWidth: 480 }}>
@@ -1783,7 +2096,7 @@ export default function PersonalFinanceDashboard() {
                     <div className="bg-blue-50 border border-blue-200 rounded-xl p-3.5 flex items-start gap-2.5">
                       <Info size={16} className="text-blue-600 flex-shrink-0 mt-0.5" />
                       <div className="text-xs text-blue-900">
-                        <strong>Avvia il tracking storico:</strong> salva uno snapshot oggi dalla Dashboard. Dopo 2-3 mesi avrai dati significativi per analizzare l'aderenza alla traiettoria.
+                        <strong>Tracking automatico attivo:</strong> uno snapshot viene salvato automaticamente ogni mese alla prima apertura dell'app. Dopo 2-3 mesi avrai dati significativi per analizzare l'aderenza alla traiettoria.
                       </div>
                     </div>
                   )}
@@ -2127,6 +2440,49 @@ export default function PersonalFinanceDashboard() {
             </Card>
 
             <Card>
+              <CardHeader title="Spese fisse mensili"
+                subtitle={totalFixedExpenses > 0 ? `Totale ${fmt(totalFixedExpenses)}/mese · Margine reale ${fmt(realMargin)}` : 'Configura le tue uscite ricorrenti'}
+                icon={Home} accentColor="rose" />
+              <div className="px-5 pb-5 space-y-3">
+                {Object.entries(config.expenses || {}).map(([key, exp]: [string, any]) => {
+                  const Icon = EXPENSE_ICONS[exp.icon] || Home;
+                  return (
+                    <div key={key} className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-slate-100 text-slate-600 flex items-center justify-center flex-shrink-0">
+                        <Icon size={15} />
+                      </div>
+                      <span className="text-sm text-slate-700 flex-1">{exp.label}</span>
+                      <MoneyInput
+                        size="sm"
+                        className="w-32"
+                        value={exp.amount || ''}
+                        onChange={v => updateConfig({
+                          expenses: {
+                            ...config.expenses,
+                            [key]: { ...exp, amount: safeNum(v) }
+                          }
+                        })}
+                      />
+                    </div>
+                  );
+                })}
+                <div className="flex justify-between items-center pt-2 border-t border-slate-100 text-xs">
+                  <span className="text-slate-500">Totale spese fisse</span>
+                  <span className="font-semibold tabular-nums text-rose-700">{fmt(totalFixedExpenses)}/mese</span>
+                </div>
+                {totalFixedExpenses > 0 && (
+                  <div className={`rounded-lg p-2.5 text-xs flex items-center gap-2 ${realMargin >= 0 ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'}`}>
+                    {realMargin >= 0
+                      ? <><CheckCircle2 size={13} className="text-emerald-600 flex-shrink-0" /><span>Margine mensile dopo PAC: <strong>{fmt(realMargin)}</strong></span></>
+                      : <><AlertCircle size={13} className="text-amber-600 flex-shrink-0" /><span>PAC sovradimensionato di <strong>{fmt(Math.abs(realMargin))}</strong> rispetto alle entrate disponibili</span></>
+                    }
+                  </div>
+                )}
+                <p className="text-[11px] text-slate-400">Le spese fisse sono automaticamente dedotte dal cashflow. Non richiedono conferma mensile.</p>
+              </div>
+            </Card>
+
+            <Card>
               <CardHeader title="Cap sistema a cascata" icon={Wallet} accentColor="amber" />
               <div className="px-5 pb-5 space-y-2">
                 {config.waterfallLevels.map((lv, idx) => (
@@ -2147,6 +2503,27 @@ export default function PersonalFinanceDashboard() {
                   </div>
                 ))}
                 <p className="text-[11px] text-slate-500 pt-1">Cap = 0 significa nessun limite (livello overflow).</p>
+              </div>
+            </Card>
+
+            <Card>
+              <CardHeader title="Obiettivo FIRE" subtitle="Riconfigura età target e rendimento atteso" icon={Flame} accentColor="orange"
+                action={<Button size="sm" icon={Sparkles} onClick={() => { setObRetireAge(String(state.fireParams.retireAge)); setObReturnRate(String(state.fireParams.rate)); setShowFireWizard(true); }}>Configura</Button>} />
+              <div className="px-5 pb-5">
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="bg-orange-50 rounded-lg p-3">
+                    <div className="text-[10px] font-semibold uppercase tracking-wider text-orange-600 mb-1">Età ritiro</div>
+                    <div className="text-sm font-semibold text-slate-900">{state.fireParams.retireAge} anni</div>
+                  </div>
+                  <div className="bg-orange-50 rounded-lg p-3">
+                    <div className="text-[10px] font-semibold uppercase tracking-wider text-orange-600 mb-1">Rendimento PAC</div>
+                    <div className="text-sm font-semibold text-slate-900">{state.fireParams.rate}%</div>
+                  </div>
+                  <div className="bg-orange-50 rounded-lg p-3">
+                    <div className="text-[10px] font-semibold uppercase tracking-wider text-orange-600 mb-1">Milestone generate</div>
+                    <div className="text-sm font-semibold text-slate-900">{MILESTONES.length}</div>
+                  </div>
+                </div>
               </div>
             </Card>
 
@@ -2173,7 +2550,7 @@ export default function PersonalFinanceDashboard() {
 
       {/* Footer */}
       <footer className="max-w-6xl mx-auto px-4 sm:px-6 py-6 text-center text-xs text-slate-400">
-        Personal Finance Dashboard · v{APP_VERSION} · Salvataggio automatico attivo
+        Finance Personal Dashboard · v{APP_VERSION} · Salvataggio automatico attivo
       </footer>
 
       {/* Toast */}
@@ -2267,6 +2644,163 @@ export default function PersonalFinanceDashboard() {
       {/* Confirm dialog */}
       <ConfirmDialog open={!!confirmDialog} {...(confirmDialog || {})}
         onCancel={() => setConfirmDialog(null)} />
+
+      {/* ─── PAC Confirm Modal ─── */}
+      {pacConfirmDialog && (() => {
+        const actualAmt = safeNum(pacConfirmDialog.actual);
+        const basePac = config.pac.monthlyAmount;
+        const excess = Math.max(0, actualAmt - basePac);
+        const excessAllocTotal = Object.values(pacConfirmDialog.excessAlloc).reduce((s, v) => s + safeNum(v), 0);
+        const excessDiff = excess - excessAllocTotal;
+        const isValid = actualAmt > 0 && (excess === 0 || Math.abs(excessDiff) < 1);
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm" onClick={() => setPacConfirmDialog(null)}>
+            <div className="bg-white rounded-2xl border border-slate-200 max-w-md w-full p-5 shadow-xl" onClick={e => e.stopPropagation()}>
+              <div className="flex items-start justify-between mb-4">
+                <div>
+                  <h3 className="text-base font-semibold text-slate-900 flex items-center gap-2">
+                    <CreditCard size={16} className="text-indigo-600" />Conferma PAC
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">Inserisci l'importo effettivamente versato</p>
+                </div>
+                <button onClick={() => setPacConfirmDialog(null)} className="text-slate-400 hover:text-slate-700"><X size={18} /></button>
+              </div>
+
+              {/* Importo reale */}
+              <div className="mb-4">
+                <label className="text-xs font-medium text-slate-700 block mb-1.5">Importo versato</label>
+                <MoneyInput size="lg" value={pacConfirmDialog.actual}
+                  onChange={v => setPacConfirmDialog({ ...pacConfirmDialog, actual: v })} />
+                <div className="flex items-center justify-between mt-1.5 text-[11px]">
+                  <span className="text-slate-500">Piano standard: {fmt(basePac)}</span>
+                  {actualAmt > basePac && <span className="text-indigo-600 font-medium">+{fmt(excess)} eccedenza</span>}
+                  {actualAmt < basePac && actualAmt > 0 && <span className="text-amber-600 font-medium">−{fmt(basePac - actualAmt)} sotto piano</span>}
+                </div>
+              </div>
+
+              {/* Allocazione base — automatica */}
+              <div className="bg-slate-50 rounded-xl p-3 mb-4">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2">
+                  Allocazione base {fmt(Math.min(actualAmt, basePac))} — automatica
+                </p>
+                <div className="space-y-1">
+                  {config.pac.instruments.map(ins => (
+                    <div key={ins.id} className="flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full" style={{ background: ins.color }} />
+                        <span className="text-slate-700 truncate">{ins.name}</span>
+                        <span className="text-slate-400">{ins.pct}%</span>
+                      </div>
+                      <span className="tabular-nums text-slate-600 font-medium">
+                        {fmt(Math.min(actualAmt, basePac) * ins.pct / 100)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Eccedenza — opzionale */}
+              {excess > 0 && (
+                <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-3 mb-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-indigo-600 mb-0.5">
+                    Eccedenza {fmt(excess)} — dove l'hai versata? (opzionale)
+                  </p>
+                  <p className="text-[10px] text-indigo-500 mb-2">Lascia vuoto se hai seguito il piano standard</p>
+                  <div className="space-y-1.5">
+                    {config.pac.instruments.map(ins => (
+                      <div key={ins.id} className="flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: ins.color }} />
+                        <span className="text-xs text-slate-700 flex-1 truncate">{ins.name}</span>
+                        <MoneyInput size="sm" className="w-28"
+                          value={pacConfirmDialog.excessAlloc[ins.id] || ''}
+                          onChange={v => setPacConfirmDialog({
+                            ...pacConfirmDialog,
+                            excessAlloc: { ...pacConfirmDialog.excessAlloc, [ins.id]: v }
+                          })} />
+                      </div>
+                    ))}
+                    <div className="flex justify-between text-[11px] pt-1 border-t border-indigo-200">
+                      <span className="text-indigo-600">Totale allocato</span>
+                      <span className={`font-semibold tabular-nums ${Math.abs(excessDiff) < 1 ? 'text-emerald-600' : 'text-amber-600'}`}>
+                        {fmt(excessAllocTotal)} / {fmt(excess)}
+                        {excessAllocTotal > 0 && Math.abs(excessDiff) >= 1 && ` (mancano ${fmt(excessDiff)})`}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2">
+                <Button variant="secondary" onClick={() => setPacConfirmDialog(null)}>Annulla</Button>
+                <Button variant="primary" icon={Check}
+                  disabled={actualAmt <= 0 || (excess > 0 && excessAllocTotal > 0 && Math.abs(excessDiff) >= 1)}
+                  onClick={() => {
+                    const excessNum: Record<string, number> = {};
+                    Object.entries(pacConfirmDialog.excessAlloc).forEach(([k, v]) => { excessNum[k] = safeNum(v); });
+                    applyPacConfirm(pacConfirmDialog.key, actualAmt, excessNum);
+                  }}>
+                  Conferma versamento
+                </Button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ─── FIRE Wizard Modal ─── */}
+      {showFireWizard && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm" onClick={() => setShowFireWizard(false)}>
+          <div className="bg-white rounded-2xl border border-slate-200 max-w-sm w-full p-6 shadow-xl" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-5">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 bg-orange-100 text-orange-600 rounded-lg flex items-center justify-center"><Flame size={16} /></div>
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-900">Obiettivo FIRE</h3>
+                  <p className="text-[11px] text-slate-500">Le milestone si aggiornano automaticamente</p>
+                </div>
+              </div>
+              <button onClick={() => setShowFireWizard(false)} className="text-slate-400 hover:text-slate-700"><X size={18} /></button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs font-medium text-slate-700 block mb-1.5">Età target per il FIRE</label>
+                <input type="number" value={obRetireAge} onChange={e => setObRetireAge(e.target.value)}
+                  min={30} max={70}
+                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-300 bg-white" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-700 block mb-1.5">Rendimento annuo atteso PAC (%)</label>
+                <input type="number" value={obReturnRate} onChange={e => setObReturnRate(e.target.value)}
+                  min={1} max={12} step={0.5}
+                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-300 bg-white" />
+                <p className="text-[11px] text-slate-400 mt-1">Prudente 5% · Storico S&P 500 ≈ 7%</p>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-700 block mb-1.5">Rendita mensile desiderata (€)</label>
+                <input type="number" value={obMonthlyExpense} onChange={e => setObMonthlyExpense(e.target.value)}
+                  placeholder="es. 2000" min={0}
+                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-300 bg-white" />
+                {obMonthlyExpense && (
+                  <p className="text-[11px] text-orange-600 mt-1 font-medium">
+                    FIRE number: {fmt(safeNum(obMonthlyExpense) * 12 / 0.04)} · Milestone generate: {
+                      (() => {
+                        const age = parseInt(obRetireAge) || 50;
+                        const cur = ageFromYear(config.profile.birthYear);
+                        return Math.max(0, Math.floor((age - cur - 3) / 5)) + 2;
+                      })()
+                    }
+                  </p>
+                )}
+              </div>
+              <div className="flex gap-2 pt-2">
+                <Button variant="secondary" className="flex-1" onClick={() => setShowFireWizard(false)}>Annulla</Button>
+                <Button variant="primary" className="flex-1" icon={Check} onClick={applyFireWizard}>Salva</Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
