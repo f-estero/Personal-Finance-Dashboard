@@ -1,6 +1,6 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss/base";
+@import "tailwindcss/components";
+@import "tailwindcss/utilities";
 
 /* ═══════════════════════════════════════════════════════════
    DARK MODE — CSS Override System
@@ -175,5 +175,93 @@ body {
   * {
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;
+  }
+
+  /* Premium PDF styling classes */
+  .pdf-serif {
+    font-family: Georgia, Garamond, "Times New Roman", serif !important;
+  }
+  .pdf-sans {
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
+  }
+  .pdf-page {
+    width: 210mm !important;
+    height: 296.8mm !important; /* precise A4 height */
+    padding: 20mm !important;
+    position: relative !important;
+    box-sizing: border-box !important;
+    overflow: hidden !important;
+    page-break-after: always !important;
+    page-break-inside: avoid !important;
+    background: white !important;
+    z-index: 10 !important;
+  }
+  .pdf-watermark {
+    position: absolute !important;
+    top: 50% !important;
+    left: 50% !important;
+    transform: translate(-50%, -50%) rotate(-30deg) !important;
+    font-size: 48px !important;
+    font-weight: 900 !important;
+    color: rgba(15, 25, 35, 0.03) !important;
+    white-space: nowrap !important;
+    pointer-events: none !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.2em !important;
+    z-index: 0 !important;
+    font-family: ui-sans-serif, system-ui, sans-serif !important;
+  }
+  .pdf-navy-bg {
+    background-color: #0f1923 !important;
+  }
+  .pdf-navy-text {
+    color: #0f1923 !important;
+  }
+  .pdf-gold-text {
+    color: #c9a84c !important;
+  }
+  .pdf-gold-bg {
+    background-color: #c9a84c !important;
+  }
+  .pdf-gold-border {
+    border-color: #c9a84c !important;
+  }
+  .pdf-footer {
+    position: absolute !important;
+    bottom: 12mm !important;
+    left: 20mm !important;
+    right: 20mm !important;
+    display: flex !important;
+    justify-content: space-between !important;
+    align-items: center !important;
+    font-size: 8px !important;
+    color: #888888 !important;
+    border-top: 1px solid #eeeeee !important;
+    padding-top: 3mm !important;
+    font-family: ui-sans-serif, system-ui, sans-serif !important;
+  }
+  .pdf-table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+  }
+  .pdf-table th {
+    background-color: #0f1923 !important;
+    color: white !important;
+    font-weight: bold !important;
+    text-transform: uppercase !important;
+    font-size: 8px !important;
+    letter-spacing: 0.05em !important;
+    padding: 6px 8px !important;
+    border: 1px solid #2e3b4e !important;
+    text-align: left !important;
+  }
+  .pdf-table td {
+    padding: 6px 8px !important;
+    border: 1px solid #e2e8f0 !important;
+    font-size: 8.5px !important;
+    color: #334155 !important;
+  }
+  .pdf-table tr:nth-child(even) td {
+    background-color: #f8fafc !important;
   }
 }
