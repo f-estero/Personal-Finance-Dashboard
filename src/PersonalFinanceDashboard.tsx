@@ -544,13 +544,13 @@ export default function PersonalFinanceDashboard() {
 
     const today = todayKey();
     const currentMonthPrefix = today.substring(0, 7); // es. "2026-05"
-    const alreadyThisMonth = state.snapshots.some(s => s.date.startsWith(currentMonthPrefix));
+    const alreadyThisMonth = (state.snapshots || []).some(s => s && s.date && s.date.startsWith(currentMonthPrefix));
 
     if (!alreadyThisMonth) {
       const liq = Object.values(state.waterfallCurrent).reduce((a: number, b) => a + (b as number || 0), 0);
       const nw = state.etfValue + state.fonteValue + liq;
       const snap = { date: today, etf: state.etfValue, fonte: state.fonteValue, liq, nw };
-      const newSnaps = [...state.snapshots.filter(s => s.date !== today), snap]
+      const newSnaps = [...(state.snapshots || []).filter(s => s && s.date && s.date !== today), snap]
         .sort((a, b) => a.date.localeCompare(b.date))
         .slice(-60);
       updateState({ snapshots: newSnaps });
@@ -1079,7 +1079,7 @@ export default function PersonalFinanceDashboard() {
   const saveSnapshot = () => {
     const k = todayKey();
     const snap = { date: k, etf: state.etfValue, fonte: state.fonteValue, liq: totalLiq, nw: netWorth };
-    const newSnaps = [...state.snapshots.filter(s => s.date !== k), snap].sort((a, b) => a.date.localeCompare(b.date)).slice(-60);
+    const newSnaps = [...(state.snapshots || []).filter(s => s && s.date && s.date !== k), snap].sort((a, b) => a.date.localeCompare(b.date)).slice(-60);
     updateState({ snapshots: newSnaps });
     setToast({ message: 'Snapshot salvato', type: 'success' });
   };
@@ -1275,7 +1275,7 @@ export default function PersonalFinanceDashboard() {
 
   // ─── Performance portafoglio ───
   const performanceData = useMemo(() => {
-    const snaps = [...state.snapshots].sort((a, b) => a.date.localeCompare(b.date));
+    const snaps = [...state.snapshots].filter(s => s && s.date).sort((a, b) => a.date.localeCompare(b.date));
     if (snaps.length < 2) return null;
     const first = snaps[0], last = snaps[snaps.length - 1];
     const daysDiff = (new Date(last.date).getTime() - new Date(first.date).getTime()) / 86400000;
@@ -1283,12 +1283,12 @@ export default function PersonalFinanceDashboard() {
     const totalReturn = first.nw > 0 ? ((last.nw - first.nw) / first.nw) * 100 : 0;
     const yearsDiff = daysDiff / 365.25;
     const cagr = first.nw > 0 && yearsDiff > 0.08 ? (Math.pow(last.nw / first.nw, 1 / yearsDiff) - 1) * 100 : 0;
-    const ytdStart = snaps.find(s => s.date.startsWith(String(cy)));
+    const ytdStart = snaps.find(s => s.date && s.date.startsWith(String(cy)));
     const ytd = ytdStart && ytdStart.nw > 0 ? ((last.nw - ytdStart.nw) / ytdStart.nw) * 100 : 0;
-    const weightedTer = config.pac.instruments.reduce((sum, ins) => sum + (ins.ter || 0) * ins.pct / 100, 0);
+    const weightedTer = (config.pac?.instruments || []).filter(Boolean).reduce((sum, ins) => sum + (ins.ter || 0) * (ins.pct || 0) / 100, 0);
     const annualTerCost = state.etfValue * weightedTer / 100;
     return { totalReturn, cagr, ytd, annualTerCost, weightedTer, monthsDiff, first, last };
-  }, [state.snapshots, state.etfValue, config.pac.instruments, cy]);
+  }, [state.snapshots, state.etfValue, config.pac?.instruments, cy]);
 
   // ─── Composizione patrimonio ───
   const compositionData = useMemo(() => {
@@ -1301,9 +1301,15 @@ export default function PersonalFinanceDashboard() {
         { name: 'Fon.Te.', value: state.fonteValue, pct: fontePct, color: '#8b5cf6' },
         { name: 'Liquidità', value: totalLiq, pct: cashPct, color: '#f59e0b' },
       ].filter(d => d.value > 0),
-      stacked: [...state.snapshots].sort((a, b) => a.date.localeCompare(b.date)).map(s => ({
-        date: s.date, ETF: s.etf, 'Fon.Te.': s.fonte, 'Liquidità': s.liq,
-      })),
+      stacked: [...state.snapshots]
+        .filter(s => s && s.date)
+        .sort((a, b) => a.date.localeCompare(b.date))
+        .map(s => ({
+          date: s.date,
+          ETF: s.etf || 0,
+          'Fon.Te.': s.fonte || 0,
+          'Liquidità': s.liq || 0,
+        })),
     };
   }, [state.etfValue, state.fonteValue, totalLiq, netWorth, state.snapshots]);
 
@@ -1338,7 +1344,7 @@ export default function PersonalFinanceDashboard() {
     if (ral <= 0) return null;
     let marginalRate = 23;
     for (const b of IRPEF_BRACKETS) { if (ral > b.min) marginalRate = b.rate; }
-    const contribs = config.fonte?.contributions || [];
+    const contribs = (config.fonte?.contributions || []).filter(c => c && c.year);
     const currentYearContribs = contribs.filter(c => c.year === cy);
     const totalAderente = currentYearContribs.reduce((s, c) => s + safeNum(c.aderente) + safeNum(c.volontario), 0);
     const deductible = config.fonte?.annualDeductibleOverride != null
@@ -1347,7 +1353,7 @@ export default function PersonalFinanceDashboard() {
     const taxSaving = deductible * marginalRate / 100;
     const byYear = {};
     contribs.forEach(c => {
-      if (!byYear[c.year]) byYear[c.year] = { aderente: 0, azienda: 0, tfr: 0, volontario: 0, welfare: 0, totale: 0 };
+      if (!byYear[c.year]) byYear[c.year] = { coderente: 0, aderente: 0, azienda: 0, tfr: 0, volontario: 0, welfare: 0, totale: 0 };
       byYear[c.year].aderente += safeNum(c.aderente);
       byYear[c.year].azienda += safeNum(c.azienda);
       byYear[c.year].tfr += safeNum(c.tfr);
@@ -1360,8 +1366,8 @@ export default function PersonalFinanceDashboard() {
 
   // ─── Growth tracker ───
   const growthTracker = useMemo(() => {
-    const snaps = [...state.snapshots].sort((a, b) => a.date.localeCompare(b.date));
-    const startOfYear = snaps.find(s => s.date.startsWith(String(cy)));
+    const snaps = [...state.snapshots].filter(s => s && s.date).sort((a, b) => a.date.localeCompare(b.date));
+    const startOfYear = snaps.find(s => s.date && s.date.startsWith(String(cy)));
     if (!startOfYear) return null;
     const currentGrowth = startOfYear.nw > 0 ? ((netWorth - startOfYear.nw) / startOfYear.nw) * 100 : 0;
     const targetPct = config.annualGrowthTarget || 0;
@@ -2091,7 +2097,7 @@ export default function PersonalFinanceDashboard() {
                 <CardHeader title="Andamento patrimonio" subtitle={`${state.snapshots.length} snapshot registrati`} icon={TrendingUp} accentColor="emerald" />
                 <div className="px-5 pb-5">
                   <ResponsiveContainer width="100%" height={220}>
-                    <AreaChart data={state.snapshots}>
+                    <AreaChart data={[...state.snapshots].filter(s => s && s.date && s.nw !== undefined)}>
                       <defs>
                         <linearGradient id="nwGrad" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
@@ -3182,7 +3188,7 @@ export default function PersonalFinanceDashboard() {
                         </tr>
                       </thead>
                       <tbody>
-                        {[...state.snapshots].reverse().map(s => (
+                        {[...state.snapshots].filter(s => s && s.date).reverse().map(s => (
                           <tr key={s.date} className="border-b border-slate-100 hover:bg-slate-50">
                             <td className="py-2.5 px-2 font-medium text-slate-900">{s.date}</td>
                             <td className="py-2.5 px-2 text-right tabular-nums text-blue-700">{fmt(s.etf)}</td>
@@ -3206,7 +3212,7 @@ export default function PersonalFinanceDashboard() {
 
         {/* ═══════════ ANALYTICS ═══════════ */}
         {tab === 'analytics' && (() => {
-          const sortedSnaps = [...state.snapshots].sort((a, b) => a.date.localeCompare(b.date));
+          const sortedSnaps = [...state.snapshots].filter(s => s && s.date).sort((a, b) => a.date.localeCompare(b.date));
           const hasData = sortedSnaps.length >= 2;
           const firstSnap = sortedSnaps[0];
           const lastSnap = sortedSnaps[sortedSnaps.length - 1];
