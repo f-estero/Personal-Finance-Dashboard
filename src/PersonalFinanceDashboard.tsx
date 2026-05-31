@@ -11,7 +11,8 @@ import {
   Plus, Trash2, Download, Upload, RotateCcw, LayoutDashboard,
   ChevronRight, ChevronDown, Sparkles, Briefcase, ChevronLeft,
   CreditCard, Shield, Coffee, Zap, Rocket, Save, X, Info,
-  Edit3, Check, ArrowUpRight, FileText, Hash, LogOut, Home, Tv, Phone
+  Edit3, Check, ArrowUpRight, FileText, Hash, LogOut, Home, Tv, Phone,
+  Moon, Sun, Trophy, Percent, Receipt
 } from 'lucide-react';
 
 // ═══════════════════════════════════════════════════════════
@@ -27,15 +28,15 @@ const MONTHS_IT_SHORT = ['Gen','Feb','Mar','Apr','Mag','Giu','Lug','Ago','Set','
 
 const DEFAULT_CONFIG = {
   profile: { name: '', birthYear: new Date().getFullYear() - 30 },
-  salary: { netAmount: 0, bonusAmount: 0, bonusMonths: [], payDay: 27 },
+  salary: { netAmount: 0, bonusAmount: 0, bonusMonths: [], payDay: 27, ral: 0 },
   pac: {
     monthlyAmount: 0, payDay: 1, broker: '',
     instruments: [
       { id: 'ins1', name: 'ETF 1', pct: 100, ter: 0.20, color: '#3b82f6', ticker: '' },
     ]
   },
-  marketApiKey: '', // Alpha Vantage API key (gratuita su alphavantage.co)
-  fonte: { monthlyContribution: 0, ter: 0, comparto: '' },
+  marketApiKey: '',
+  fonte: { monthlyContribution: 0, ter: 0, comparto: '', contributions: [], annualDeductibleOverride: null },
   expenses: {
     affitto:       { amount: 0, label: 'Affitto',       icon: 'home'    },
     utenze:        { amount: 0, label: 'Utenze',        icon: 'zap'     },
@@ -49,6 +50,12 @@ const DEFAULT_CONFIG = {
     { id: 'l3', name: 'Liquidità Operativa',   desc: 'Spese mensili correnti',            cap: 0, color: '#f59e0b', icon: 'zap' },
     { id: 'l4', name: 'Overflow → Investimenti', desc: 'Eccedenza da investire',          cap: 0, color: '#6366f1', icon: 'rocket' },
   ],
+  // Obiettivi e FIRE
+  goals: [],
+  annualGrowthTarget: 0,
+  fireNumber: 0,
+  monthlyDesiredIncome: 0,
+  darkMode: false,
 };
 
 const DEFAULT_STATE = {
@@ -332,6 +339,11 @@ export default function PersonalFinanceDashboard() {
   const [obReturnRate, setObReturnRate] = useState('5.0');
   const [showFireWizard, setShowFireWizard] = useState(false);
   const fileInputRef = useRef(null);
+  // Goals & Fon.Te. contributions UI
+  const [showAddGoal, setShowAddGoal] = useState(false);
+  const [newGoal, setNewGoal] = useState({ title: '', targetAmount: '', currentAmount: '', deadline: '', color: '#3b82f6' });
+  const [showAddContrib, setShowAddContrib] = useState(false);
+  const [newContrib, setNewContrib] = useState({ year: new Date().getFullYear(), quarter: 1, aderente: '', azienda: '', tfr: '', volontario: '', welfare: '' });
 
   // ─── Load & migrate ───
   useEffect(() => {
@@ -377,6 +389,17 @@ export default function PersonalFinanceDashboard() {
     }
   }, [loaded]);
 
+  // ─── Dark mode toggle ───
+  useEffect(() => {
+    if (config.darkMode) {
+      document.body.classList.add('dark');
+      document.documentElement.classList.add('dark');
+    } else {
+      document.body.classList.remove('dark');
+      document.documentElement.classList.remove('dark');
+    }
+  }, [config.darkMode]);
+
   // ─── Auto-snapshot mensile ───
   // Ogni volta che l'app si apre, se non esiste già uno snapshot
   // del mese corrente e l'utente ha dati significativi, lo salva automaticamente.
@@ -421,6 +444,68 @@ export default function PersonalFinanceDashboard() {
     updateState({ fireParams: { rate, fonteRate: rate - 2 > 0 ? rate - 2 : 2, retireAge } });
     setShowFireWizard(false);
     setToast({ message: 'Obiettivo FIRE aggiornato', type: 'success' });
+  };
+
+  const addGoal = () => {
+    if (!newGoal.title || !newGoal.targetAmount) return;
+    const target = safeNum(newGoal.targetAmount);
+    const current = safeNum(newGoal.currentAmount || 0);
+    const newG = {
+      id: 'goal_' + Date.now(),
+      title: newGoal.title,
+      targetAmount: target,
+      currentAmount: current,
+      deadline: newGoal.deadline,
+      color: newGoal.color || '#3b82f6',
+      icon: 'target'
+    };
+    updateConfig({ goals: [...(config.goals || []), newG] });
+    setNewGoal({ title: '', targetAmount: '', currentAmount: '', deadline: '', color: '#3b82f6' });
+    setShowAddGoal(false);
+    setToast({ message: 'Obiettivo aggiunto', type: 'success' });
+  };
+
+  const deleteGoal = (id) => {
+    updateConfig({ goals: (config.goals || []).filter(g => g.id !== id) });
+    setToast({ message: 'Obiettivo rimosso', type: 'info' });
+  };
+
+  const addFonteContribution = () => {
+    const aderente = safeNum(newContrib.aderente);
+    const azienda = safeNum(newContrib.azienda);
+    const tfr = safeNum(newContrib.tfr);
+    const volontario = safeNum(newContrib.volontario);
+    const welfare = safeNum(newContrib.welfare);
+    const totale = aderente + azienda + tfr + volontario + welfare;
+    if (totale <= 0) return;
+
+    const quarter = parseInt(String(newContrib.quarter)) || 1;
+    const year = parseInt(String(newContrib.year)) || cy;
+
+    const newC = {
+      id: 'contrib_' + Date.now(),
+      year,
+      quarter,
+      aderente,
+      azienda,
+      tfr,
+      volontario,
+      welfare,
+      totale
+    };
+    
+    const contributions = [...(config.fonte?.contributions || []), newC];
+    updateConfig({ fonte: { ...config.fonte, contributions } });
+    
+    setNewContrib({ year: cy, quarter: 1, aderente: '', azienda: '', tfr: '', volontario: '', welfare: '' });
+    setShowAddContrib(false);
+    setToast({ message: 'Contributo registrato', type: 'success' });
+  };
+
+  const deleteFonteContribution = (id) => {
+    const contributions = (config.fonte?.contributions || []).filter(c => c.id !== id && `${c.year}-${c.quarter}` !== id);
+    updateConfig({ fonte: { ...config.fonte, contributions } });
+    setToast({ message: 'Contributo rimosso', type: 'info' });
   };
 
   // ─── Auto-save (debounced) ───
@@ -836,6 +921,104 @@ export default function PersonalFinanceDashboard() {
     return { ...sc, pac50: Math.round(pac50), r50: Math.round(pac50 * 0.04 / 12), pac55: Math.round(pac55), r55: Math.round(pac55 * 0.04 / 12) };
   }), [state.etfValue, config]);
 
+  // ─── Performance portafoglio ───
+  const performanceData = useMemo(() => {
+    const snaps = [...state.snapshots].sort((a, b) => a.date.localeCompare(b.date));
+    if (snaps.length < 2) return null;
+    const first = snaps[0], last = snaps[snaps.length - 1];
+    const daysDiff = (new Date(last.date).getTime() - new Date(first.date).getTime()) / 86400000;
+    const monthsDiff = Math.max(daysDiff / 30.44, 0.1);
+    const totalReturn = first.nw > 0 ? ((last.nw - first.nw) / first.nw) * 100 : 0;
+    const yearsDiff = daysDiff / 365.25;
+    const cagr = first.nw > 0 && yearsDiff > 0.08 ? (Math.pow(last.nw / first.nw, 1 / yearsDiff) - 1) * 100 : 0;
+    const ytdStart = snaps.find(s => s.date.startsWith(String(cy)));
+    const ytd = ytdStart && ytdStart.nw > 0 ? ((last.nw - ytdStart.nw) / ytdStart.nw) * 100 : 0;
+    const weightedTer = config.pac.instruments.reduce((sum, ins) => sum + (ins.ter || 0) * ins.pct / 100, 0);
+    const annualTerCost = state.etfValue * weightedTer / 100;
+    return { totalReturn, cagr, ytd, annualTerCost, weightedTer, monthsDiff, first, last };
+  }, [state.snapshots, state.etfValue, config.pac.instruments, cy]);
+
+  // ─── Composizione patrimonio ───
+  const compositionData = useMemo(() => {
+    const etfPct = netWorth > 0 ? (state.etfValue / netWorth) * 100 : 0;
+    const fontePct = netWorth > 0 ? (state.fonteValue / netWorth) * 100 : 0;
+    const cashPct = netWorth > 0 ? (totalLiq / netWorth) * 100 : 0;
+    return {
+      pie: [
+        { name: 'ETF', value: state.etfValue, pct: etfPct, color: '#3b82f6' },
+        { name: 'Fon.Te.', value: state.fonteValue, pct: fontePct, color: '#8b5cf6' },
+        { name: 'Liquidità', value: totalLiq, pct: cashPct, color: '#f59e0b' },
+      ].filter(d => d.value > 0),
+      stacked: [...state.snapshots].sort((a, b) => a.date.localeCompare(b.date)).map(s => ({
+        date: s.date, ETF: s.etf, 'Fon.Te.': s.fonte, 'Liquidità': s.liq,
+      })),
+    };
+  }, [state.etfValue, state.fonteValue, totalLiq, netWorth, state.snapshots]);
+
+  // ─── FIRE progress ───
+  const fireProgress = useMemo(() => {
+    const fireNum = config.fireNumber > 0 ? config.fireNumber
+      : (config.monthlyDesiredIncome > 0 ? config.monthlyDesiredIncome * 12 / 0.04 : 0);
+    if (fireNum <= 0) return null;
+    const progress = Math.min((netWorth / fireNum) * 100, 100);
+    const remaining = Math.max(0, fireNum - netWorth);
+    const monthlyAccum = config.pac.monthlyAmount + config.fonte.monthlyContribution;
+    const r = (state.fireParams.rate || 5) / 12 / 100;
+    let months = 0, pv = netWorth;
+    while (pv < fireNum && months < 600) { pv = pv * (1 + r) + monthlyAccum; months++; }
+    const currentAge = ageFromYear(config.profile.birthYear);
+    const yearsToRetire = state.fireParams.retireAge - currentAge;
+    const coastFire = yearsToRetire > 0 ? fireNum / Math.pow(1 + state.fireParams.rate / 100, yearsToRetire) : fireNum;
+    const coastProgress = Math.min((netWorth / coastFire) * 100, 100);
+    return { fireNum, progress, remaining, months, coastFire, coastProgress, currentAge };
+  }, [config, netWorth, state.fireParams]);
+
+  // ─── Deducibilità Fon.Te. (IRPEF) ───
+  const IRPEF_BRACKETS = [
+    { min: 0, max: 28000, rate: 23 },
+    { min: 28000, max: 50000, rate: 35 },
+    { min: 50000, max: Infinity, rate: 43 },
+  ];
+  const MAX_DEDUCTIBLE = 5164.57;
+
+  const fonteDeducibility = useMemo(() => {
+    const ral = config.salary?.ral || 0;
+    if (ral <= 0) return null;
+    let marginalRate = 23;
+    for (const b of IRPEF_BRACKETS) { if (ral > b.min) marginalRate = b.rate; }
+    const contribs = config.fonte?.contributions || [];
+    const currentYearContribs = contribs.filter(c => c.year === cy);
+    const totalAderente = currentYearContribs.reduce((s, c) => s + safeNum(c.aderente) + safeNum(c.volontario), 0);
+    const deductible = config.fonte?.annualDeductibleOverride != null
+      ? config.fonte.annualDeductibleOverride
+      : Math.min(totalAderente, MAX_DEDUCTIBLE);
+    const taxSaving = deductible * marginalRate / 100;
+    const byYear = {};
+    contribs.forEach(c => {
+      if (!byYear[c.year]) byYear[c.year] = { aderente: 0, azienda: 0, tfr: 0, volontario: 0, welfare: 0, totale: 0 };
+      byYear[c.year].aderente += safeNum(c.aderente);
+      byYear[c.year].azienda += safeNum(c.azienda);
+      byYear[c.year].tfr += safeNum(c.tfr);
+      byYear[c.year].volontario += safeNum(c.volontario);
+      byYear[c.year].welfare += safeNum(c.welfare);
+      byYear[c.year].totale += safeNum(c.aderente) + safeNum(c.azienda) + safeNum(c.tfr) + safeNum(c.volontario) + safeNum(c.welfare);
+    });
+    return { ral, marginalRate, totalAderente, deductible, taxSaving, byYear, currentYearContribs };
+  }, [config.salary?.ral, config.fonte?.contributions, config.fonte?.annualDeductibleOverride, cy]);
+
+  // ─── Growth tracker ───
+  const growthTracker = useMemo(() => {
+    const snaps = [...state.snapshots].sort((a, b) => a.date.localeCompare(b.date));
+    const startOfYear = snaps.find(s => s.date.startsWith(String(cy)));
+    if (!startOfYear) return null;
+    const currentGrowth = startOfYear.nw > 0 ? ((netWorth - startOfYear.nw) / startOfYear.nw) * 100 : 0;
+    const targetPct = config.annualGrowthTarget || 0;
+    const progress = targetPct > 0 ? Math.min((currentGrowth / targetPct) * 100, 200) : 0;
+    const targetNw = startOfYear.nw * (1 + targetPct / 100);
+    const remainingToTarget = Math.max(0, targetNw - netWorth);
+    return { currentGrowth, progress, targetNw, remainingToTarget, startNw: startOfYear.nw, targetPct };
+  }, [state.snapshots, netWorth, config.annualGrowthTarget, cy]);
+
   // ─── Monthly history grid (last 12 months) ───
   const monthlyHistory = useMemo(() => {
     const rows = [];
@@ -1093,6 +1276,13 @@ export default function PersonalFinanceDashboard() {
             {syncStatus === 'idle' && <><div className="w-2 h-2 rounded-full bg-emerald-400" /><span className="text-slate-400 hidden sm:inline">Cloud sync attivo</span></>}
           </div>
           <button
+            onClick={() => updateConfig({ darkMode: !config.darkMode })}
+            className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
+            title={config.darkMode ? "Attiva Light Mode" : "Attiva Dark Mode"}
+          >
+            {config.darkMode ? <Sun size={16} /> : <Moon size={16} />}
+          </button>
+          <button
             onClick={() => supabase.auth.signOut()}
             className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
             title="Logout"
@@ -1239,6 +1429,104 @@ export default function PersonalFinanceDashboard() {
                 </Card>
               );
             })()}
+
+            {/* Goal Tracker & Crescita Annua Section */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              {/* Card Crescita Annua */}
+              <Card>
+                <CardHeader title="Obiettivo Crescita Patrimonio" subtitle="Tracciamento dell'aumento percentuale annuo del patrimonio netto" icon={TrendingUp} accentColor="emerald" />
+                <div className="px-5 pb-5 flex flex-col justify-between h-[210px]">
+                  {growthTracker ? (
+                    <>
+                      <div className="flex items-center justify-between mb-2">
+                        <div>
+                          <div className="text-2xl font-bold text-slate-900 tabular-nums">
+                            {growthTracker.currentGrowth > 0 ? '+' : ''}{growthTracker.currentGrowth.toFixed(2)}%
+                          </div>
+                          <p className="text-xs text-slate-500 mt-0.5">Target annuale: {growthTracker.targetPct}%</p>
+                        </div>
+                        <div className="text-right">
+                          <span className={`text-xs font-semibold px-2 py-1 rounded-full ${
+                            growthTracker.currentGrowth >= growthTracker.targetPct ? 'bg-emerald-100 text-emerald-800' :
+                            growthTracker.currentGrowth >= growthTracker.targetPct * 0.5 ? 'bg-amber-100 text-amber-800' :
+                            'bg-rose-100 text-rose-800'
+                          }`}>
+                            {growthTracker.currentGrowth >= growthTracker.targetPct ? '🟢 On-track' :
+                             growthTracker.currentGrowth >= growthTracker.targetPct * 0.5 ? '🟡 Dietro' :
+                             '🔴 Molto dietro'}
+                          </span>
+                          <p className="text-[10px] text-slate-400 mt-1.5">Inizio anno: {fmt(growthTracker.startNw)}</p>
+                        </div>
+                      </div>
+                      
+                      <div className="my-2">
+                        <div className="flex justify-between text-[10px] text-slate-500 mb-1">
+                          <span>Progresso target ({fmt(growthTracker.targetNw)})</span>
+                          <span className="tabular-nums">{growthTracker.progress.toFixed(1)}%</span>
+                        </div>
+                        <ProgressBar value={netWorth - growthTracker.startNw} max={growthTracker.targetNw - growthTracker.startNw} color="#10b981" height={8} />
+                      </div>
+
+                      <p className="text-[11px] text-slate-500 bg-slate-50 border border-slate-100 rounded-lg p-2 mt-2">
+                        {growthTracker.remainingToTarget > 0 ? (
+                          <>Mancano <strong>{fmt(growthTracker.remainingToTarget)}</strong> per raggiungere l'obiettivo patrimoniale di fine anno.</>
+                        ) : (
+                          <strong className="text-emerald-700">✓ Obiettivo annuale raggiunto! Tutto quello che accumuli d'ora in poi è surplus.</strong>
+                        )}
+                      </p>
+                    </>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center text-center h-full text-slate-400 py-6">
+                      <TrendingUp size={24} className="mb-2 text-slate-300" />
+                      <p className="text-xs">Definisci un target di crescita nelle Impostazioni per visualizzare questo pannello.</p>
+                    </div>
+                  )}
+                </div>
+              </Card>
+
+              {/* Card Obiettivi Personali */}
+              <Card>
+                <CardHeader title="Obiettivi Personali" subtitle="Traguardi finanziari dedicati (es. auto, casa, emergenze)" icon={Trophy} accentColor="indigo"
+                  action={
+                    <Button size="xs" icon={Plus} variant="primary" onClick={() => {
+                      setNewGoal({ title: '', targetAmount: '', currentAmount: '', deadline: '', color: '#3b82f6' });
+                      setShowAddGoal(true);
+                    }}>Nuovo Obiettivo</Button>
+                  } />
+                <div className="px-5 pb-5 h-[210px] overflow-y-auto space-y-3.5 pr-2 custom-scrollbar">
+                  {(config.goals || []).length === 0 ? (
+                    <div className="flex flex-col items-center justify-center text-center h-full text-slate-400 py-6">
+                      <Trophy size={24} className="mb-2 text-slate-300" />
+                      <p className="text-xs">Nessun obiettivo impostato. Clicca su "Nuovo Obiettivo" per aggiungerne uno.</p>
+                    </div>
+                  ) : (
+                    (config.goals || []).map(g => {
+                      const pct = Math.min((safeNum(g.currentAmount) / safeNum(g.targetAmount)) * 100, 100);
+                      return (
+                        <div key={g.id} className="pb-3 border-b border-slate-100 last:border-0 last:pb-0">
+                          <div className="flex items-start justify-between gap-3 mb-1.5">
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-semibold text-slate-900 truncate">{g.title}</p>
+                              {g.deadline && <p className="text-[10px] text-slate-500">Scadenza: {new Date(g.deadline).toLocaleDateString('it-IT', { year: 'numeric', month: 'short' })}</p>}
+                            </div>
+                            <div className="text-right flex-shrink-0 flex items-center gap-2">
+                              <div>
+                                <p className="text-xs font-bold text-slate-900 tabular-nums">{fmt(g.currentAmount)} / {fmt(g.targetAmount)}</p>
+                                <p className="text-[10px] text-slate-500 tabular-nums">{pct.toFixed(0)}% completato</p>
+                              </div>
+                              <button onClick={() => deleteGoal(g.id)} className="text-slate-400 hover:text-rose-600 p-1 rounded-md hover:bg-slate-100 transition-colors">
+                                <Trash2 size={12} />
+                              </button>
+                            </div>
+                          </div>
+                          <ProgressBar value={safeNum(g.currentAmount)} max={safeNum(g.targetAmount)} color={g.color} height={6} />
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </Card>
+            </div>
 
             {/* Calendar */}
             <Card>
@@ -1650,6 +1938,131 @@ export default function PersonalFinanceDashboard() {
                 </div>
               </Card>
 
+              <Card>
+                <CardHeader title="Deducibilità Fiscale Fon.Te. — Rigo E27" subtitle="Calcolo automatico degli scaglioni e del risparmio d'imposta" icon={Receipt} accentColor="emerald"
+                  action={
+                    <Button size="sm" icon={Plus} variant="primary" onClick={() => {
+                      setNewContrib({ year: cy, quarter: 1, aderente: '', azienda: '', tfr: '', volontario: '', welfare: '' });
+                      setShowAddContrib(true);
+                    }}>Aggiungi contributo</Button>
+                  } />
+                <div className="px-5 pb-5">
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 mb-5">
+                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-1">Reddito Lordo (RAL)</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs text-slate-400">€</span>
+                        <input type="number" value={config.salary?.ral || ''}
+                          placeholder="es. 35000"
+                          onChange={e => updateConfig({ salary: { ...config.salary, ral: safeNum(e.target.value) } })}
+                          className="w-full bg-transparent border-b border-dashed border-slate-300 font-semibold text-slate-900 focus:outline-none focus:border-emerald-500 text-sm py-0.5 tabular-nums" />
+                      </div>
+                    </div>
+                    <div className="bg-emerald-50/50 border border-emerald-100 rounded-xl p-3.5">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 block mb-1">Aliquota Marginale IRPEF</span>
+                      <div className="text-base font-bold text-emerald-800 tabular-nums">
+                        {fonteDeducibility ? `${fonteDeducibility.marginalRate}%` : 'N/D'}
+                      </div>
+                      <p className="text-[9px] text-emerald-600 mt-0.5">Scaglione IRPEF rilevato</p>
+                    </div>
+                    <div className="bg-purple-50/50 border border-purple-100 rounded-xl p-3.5">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-purple-600 block mb-1">Contributi Aderente ({cy})</span>
+                      <div className="text-base font-bold text-purple-800 tabular-nums">
+                        {fonteDeducibility ? fmt(fonteDeducibility.totalAderente) : 'N/D'}
+                      </div>
+                      <p className="text-[9px] text-purple-600 mt-0.5">Aderente + Volontario</p>
+                    </div>
+                    <div className="bg-blue-50/50 border border-blue-100 rounded-xl p-3.5">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600 block mb-1">Risparmio Fiscale {cy}</span>
+                      <div className="text-lg font-extrabold text-blue-800 tabular-nums">
+                        {fonteDeducibility ? fmt(fonteDeducibility.taxSaving) : 'N/D'}
+                      </div>
+                      <p className="text-[9px] text-blue-600 mt-0.5">Credito d'imposta stimato</p>
+                    </div>
+                  </div>
+
+                  {fonteDeducibility && (
+                    <div className="mb-4">
+                      <div className="flex items-center justify-between text-xs text-slate-500 mb-1">
+                        <span>Cap deducibilità fiscale (€5.164,57)</span>
+                        <span className="tabular-nums">{fonteDeducibility.deductible.toFixed(2)} / €5.164,57</span>
+                      </div>
+                      <ProgressBar value={fonteDeducibility.deductible} max={5164.57} color="#10b981" height={6} />
+                    </div>
+                  )}
+
+                  {/* Manual Override Option */}
+                  <div className="bg-slate-50 rounded-xl p-3 mb-5 border border-slate-100 flex items-center justify-between flex-wrap gap-2">
+                    <span className="text-xs font-medium text-slate-600">Override manuale deducibilità annua (€)</span>
+                    <div className="flex items-center gap-2">
+                      <input type="number"
+                        value={config.fonte.annualDeductibleOverride ?? ''}
+                        placeholder="Nessuno"
+                        onChange={e => {
+                          const val = e.target.value === '' ? null : safeNum(e.target.value);
+                          updateConfig({ fonte: { ...config.fonte, annualDeductibleOverride: val } });
+                        }}
+                        className="w-24 px-2 py-1 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white tabular-nums" />
+                      {config.fonte.annualDeductibleOverride != null && (
+                        <button onClick={() => updateConfig({ fonte: { ...config.fonte, annualDeductibleOverride: null } })}
+                          className="text-[10px] text-rose-600 hover:underline">Resetta</button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Contributions Table */}
+                  <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-2.5">Storico Versamenti Fon.Te.</h4>
+                  <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                    <table className="w-full text-xs text-left" style={{ minWidth: 600 }}>
+                      <thead className="bg-slate-50 text-slate-500 uppercase font-semibold text-[10px] border-b border-slate-200">
+                        <tr>
+                          <th className="py-2 px-3">Periodo</th>
+                          <th className="py-2 px-3 text-right">Aderente</th>
+                          <th className="py-2 px-3 text-right">Azienda</th>
+                          <th className="py-2 px-3 text-right">TFR</th>
+                          <th className="py-2 px-3 text-right">Volontario</th>
+                          <th className="py-2 px-3 text-right">Welfare</th>
+                          <th className="py-2 px-3 text-right">Totale</th>
+                          <th className="py-2 px-3 text-center">Azione</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {(config.fonte?.contributions || []).length === 0 ? (
+                          <tr>
+                            <td colSpan={8} className="py-6 text-center text-slate-400">
+                              Nessun contributo inserito. Clicca su "Aggiungi contributo" per iniziare.
+                            </td>
+                          </tr>
+                        ) : (
+                          [...(config.fonte.contributions)]
+                            .sort((a, b) => b.year - a.year || b.quarter - a.quarter)
+                            .map((c, i) => {
+                              const total = safeNum(c.aderente) + safeNum(c.azienda) + safeNum(c.tfr) + safeNum(c.volontario) + safeNum(c.welfare);
+                              return (
+                                <tr key={c.id || i} className="hover:bg-slate-50/50">
+                                  <td className="py-2.5 px-3 font-semibold text-slate-700">Q{c.quarter} {c.year}</td>
+                                  <td className="py-2.5 px-3 text-right tabular-nums">{fmt2(c.aderente)}</td>
+                                  <td className="py-2.5 px-3 text-right tabular-nums">{fmt2(c.azienda)}</td>
+                                  <td className="py-2.5 px-3 text-right tabular-nums">{fmt2(c.tfr)}</td>
+                                  <td className="py-2.5 px-3 text-right tabular-nums">{fmt2(c.volontario)}</td>
+                                  <td className="py-2.5 px-3 text-right tabular-nums">{fmt2(c.welfare)}</td>
+                                  <td className="py-2.5 px-3 text-right font-bold text-slate-900 tabular-nums">{fmt2(total)}</td>
+                                  <td className="py-2.5 px-3 text-center">
+                                    <button onClick={() => deleteFonteContribution(c.id || `${c.year}-${c.quarter}`)}
+                                      className="text-slate-400 hover:text-rose-600 p-1 rounded-md hover:bg-slate-100 transition-colors">
+                                      <Trash2 size={13} />
+                                    </button>
+                                  </td>
+                                </tr>
+                              );
+                            })
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </Card>
+
               {/* Rebalancing modal */}
               {showRebalance && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm" onClick={() => setShowRebalance(false)}>
@@ -1695,6 +2108,61 @@ export default function PersonalFinanceDashboard() {
         {/* ═══════════ FIRE ═══════════ */}
         {tab === 'fire' && (
           <div className="space-y-5">
+            {fireProgress && (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                <Card className="md:col-span-1 flex flex-col items-center justify-center p-6 text-center">
+                  <div className="relative w-40 h-40 flex items-center justify-center">
+                    <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
+                      <circle cx="50" cy="50" r="40" stroke="#f1f5f9" strokeWidth="8" fill="transparent" />
+                      <circle cx="50" cy="50" r="40" stroke="#f97316" strokeWidth="8" fill="transparent"
+                        strokeDasharray={251.2}
+                        strokeDashoffset={251.2 - (251.2 * fireProgress.progress) / 100}
+                        strokeLinecap="round" className="transition-all duration-1000 ease-out" />
+                    </svg>
+                    <div className="absolute text-center">
+                      <span className="text-3xl font-extrabold text-orange-600 tabular-nums">{fireProgress.progress.toFixed(1)}%</span>
+                      <p className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">verso FIRE</p>
+                    </div>
+                  </div>
+                  <div className="mt-4">
+                    <p className="text-sm font-semibold text-slate-900">Patrimonio attuale: {fmt(netWorth)}</p>
+                    <p className="text-xs text-slate-500 mt-0.5">Target: {fmt(fireProgress.fireNum)}</p>
+                  </div>
+                </Card>
+
+                <div className="md:col-span-2 space-y-4">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="bg-white rounded-xl border border-slate-200 p-4">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Mancano al target</span>
+                      <div className="text-xl sm:text-2xl font-bold text-slate-900 mt-1 tabular-nums">{fmt(fireProgress.remaining)}</div>
+                      <p className="text-xs text-slate-500 mt-1">Versamenti mensili: {fmt(config.pac.monthlyAmount + config.fonte.monthlyContribution)}</p>
+                    </div>
+                    <div className="bg-white rounded-xl border border-slate-200 p-4">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Tempo stimato</span>
+                      <div className="text-xl sm:text-2xl font-bold text-orange-600 mt-1 tabular-nums">
+                        {fireProgress.months >= 600 ? '50+ anni' : `~${(fireProgress.months / 12).toFixed(1)} anni`}
+                      </div>
+                      <p className="text-xs text-slate-500 mt-1">{fireProgress.months} mesi residui stimati</p>
+                    </div>
+                  </div>
+
+                  <Card className="p-4">
+                    <div className="flex items-start justify-between gap-3 mb-2">
+                      <div>
+                        <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider">Coast FIRE Progress</h4>
+                        <p className="text-[11px] text-slate-500 mt-0.5">Patrimonio target necessario oggi a {fireProgress.currentAge} anni: <strong>{fmt(fireProgress.coastFire)}</strong></p>
+                      </div>
+                      <span className="text-sm font-extrabold text-indigo-600 tabular-nums">{fireProgress.coastProgress.toFixed(1)}%</span>
+                    </div>
+                    <ProgressBar value={netWorth} max={fireProgress.coastFire} color="#6366f1" height={8} />
+                    <p className="text-[10px] text-slate-400 mt-2">
+                      Il Coast FIRE misura se il patrimonio attuale, lasciato crescere al {state.fireParams.rate}% reale senza altri contributi, raggiungerà il target FIRE all'età di {state.fireParams.retireAge} anni.
+                    </p>
+                  </Card>
+                </div>
+              </div>
+            )}
+
             <Card>
               <CardHeader title="Scenari FIRE interattivi" subtitle={`PAC ${fmt(config.pac.monthlyAmount)}/mese · Fon.Te. ${fmt(config.fonte.monthlyContribution)}/mese`} icon={Flame} accentColor="orange" />
               <div className="px-5 pb-5">
@@ -2146,6 +2614,50 @@ export default function PersonalFinanceDashboard() {
 
           return (
             <div className="space-y-5">
+              {performanceData && (
+                <Card className="mb-5">
+                  <CardHeader title="Performance & Efficienza Portafoglio" subtitle="Rendimenti storici calcolati in base alla variazione degli snapshot" icon={TrendingUp} accentColor="emerald" />
+                  <div className="px-5 pb-5">
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+                      <div className="bg-emerald-50/50 rounded-xl p-3.5 border border-emerald-100">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600">Rendimento Totale</span>
+                        <div className="text-xl sm:text-2xl font-bold text-emerald-800 mt-1 tabular-nums">
+                          {performanceData.totalReturn > 0 ? '+' : ''}{performanceData.totalReturn.toFixed(2)}%
+                        </div>
+                        <p className="text-[10px] text-emerald-600 mt-0.5">Dall'inizio del tracciamento</p>
+                      </div>
+                      <div className="bg-blue-50/50 rounded-xl p-3.5 border border-blue-100">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600">Performance YTD</span>
+                        <div className="text-xl sm:text-2xl font-bold text-blue-800 mt-1 tabular-nums">
+                          {performanceData.ytd > 0 ? '+' : ''}{performanceData.ytd.toFixed(2)}%
+                        </div>
+                        <p className="text-[10px] text-blue-600 mt-0.5">Anno corrente ({cy})</p>
+                      </div>
+                      <div className="bg-purple-50/50 rounded-xl p-3.5 border border-purple-100">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-purple-600">CAGR Annualizzato</span>
+                        <div className="text-xl sm:text-2xl font-bold text-purple-800 mt-1 tabular-nums">
+                          {performanceData.cagr > 0 ? '+' : ''}{performanceData.cagr.toFixed(2)}%
+                        </div>
+                        <p className="text-[10px] text-purple-600 mt-0.5">Tasso composto annuo</p>
+                      </div>
+                      <div className="bg-slate-50 rounded-xl p-3.5 border border-slate-200">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Costo TER Annuo</span>
+                        <div className="text-xl sm:text-2xl font-bold text-slate-800 mt-1 tabular-nums">
+                          {fmt(performanceData.annualTerCost)}
+                        </div>
+                        <p className="text-[10px] text-slate-500 mt-0.5">TER medio PAC: {performanceData.weightedTer.toFixed(2)}%</p>
+                      </div>
+                    </div>
+                    <div className="bg-slate-50 rounded-lg p-3 text-xs text-slate-500 flex items-start gap-2 border border-slate-100">
+                      <Info size={14} className="text-slate-400 flex-shrink-0 mt-0.5" />
+                      <p>
+                        I rendimenti mostrati sono basati esclusivamente sulla differenza tra il primo e l'ultimo snapshot storico del patrimonio netto. Non tengono conto dei singoli flussi di cassa intermedi né dei dividendi reinvestiti.
+                      </p>
+                    </div>
+                  </div>
+                </Card>
+              )}
+
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                 <StatCard label="Accumulo medio/mese" value={hasData ? fmt(avgMonthlyAccum) : 'N/D'}
                   sub={hasData ? `Su ${timeFrameMonths.toFixed(1)} mesi tracciati` : 'Disponibile tra ~1 mese'}
@@ -2237,6 +2749,69 @@ export default function PersonalFinanceDashboard() {
                   )}
                 </div>
               </Card>
+
+              {compositionData && (
+                <Card className="mt-5">
+                  <CardHeader title="Composizione & Diversificazione Asset" subtitle="Ripartizione attuale e andamento storico dei tuoi pilastri patrimoniali" icon={Wallet} accentColor="indigo" />
+                  <div className="px-5 pb-5">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
+                      {compositionData.pie.map(item => {
+                        let label = "";
+                        let desc = "";
+                        if (item.name === 'ETF') { label = 'ETF (Azionario)'; desc = 'Motore di crescita'; }
+                        if (item.name === 'Fon.Te.') { label = 'Previdenza'; desc = 'Ottimizzazione fiscale'; }
+                        if (item.name === 'Liquidità') { label = 'Liquidità'; desc = 'Sicurezza e operatività'; }
+                        return (
+                          <div key={item.name} className="bg-white rounded-xl border border-slate-200 p-4">
+                            <div className="flex items-center gap-2 mb-1">
+                              <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: item.color }} />
+                              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">{label}</span>
+                            </div>
+                            <div className="text-xl font-bold text-slate-900 tabular-nums">{fmt(item.value)}</div>
+                            <div className="flex justify-between text-xs text-slate-500 mt-1">
+                              <span>Quota: <strong>{item.pct.toFixed(1)}%</strong></span>
+                              <span>{desc}</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-center">
+                      <div>
+                        <p className="text-xs font-semibold text-slate-700 mb-3 text-center lg:text-left">Quota Attuale Asset</p>
+                        <ResponsiveContainer width="100%" height={220}>
+                          <PieChart>
+                            <Pie data={compositionData.pie} dataKey="value" cx="50%" cy="50%" outerRadius={80} innerRadius={45} labelLine={false}
+                              label={({ pct, name }) => pct >= 8 ? `${name} ${pct.toFixed(0)}%` : ''}>
+                              {compositionData.pie.map(i => <Cell key={i.name} fill={i.color} />)}
+                            </Pie>
+                            <Tooltip formatter={(v) => fmt(v)} contentStyle={{ fontSize: 12, borderRadius: 8 }} />
+                          </PieChart>
+                        </ResponsiveContainer>
+                      </div>
+                      <div>
+                        <p className="text-xs font-semibold text-slate-700 mb-3 text-center lg:text-left">Evoluzione Composizione nel Tempo</p>
+                        {hasData ? (
+                          <ResponsiveContainer width="100%" height={220}>
+                            <AreaChart data={compositionData.stacked} margin={{ top: 10, right: 10, left: 0, bottom: 5 }}>
+                              <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" vertical={false} />
+                              <XAxis dataKey="date" tick={{ fontSize: 11, fill: '#64748b' }} />
+                              <YAxis tick={{ fontSize: 11, fill: '#64748b' }} tickFormatter={v => `€${(v / 1000).toFixed(0)}k`} />
+                              <Tooltip formatter={v => fmt(v)} contentStyle={{ fontSize: 12, borderRadius: 8 }} />
+                              <Legend wrapperStyle={{ fontSize: 12, paddingTop: 5 }} />
+                              <Area type="monotone" dataKey="ETF" stackId="1" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.6} />
+                              <Area type="monotone" dataKey="Fon.Te." stackId="1" stroke="#8b5cf6" fill="#8b5cf6" fillOpacity={0.6} />
+                              <Area type="monotone" dataKey="Liquidità" stackId="1" stroke="#f59e0b" fill="#f59e0b" fillOpacity={0.6} />
+                            </AreaChart>
+                          </ResponsiveContainer>
+                        ) : (
+                          <EmptyState icon={TrendingUp} title="Dati storici insufficienti" description="Gli snapshots storici mostreranno l'evoluzione grafica della composizione." />
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </Card>
+              )}
             </div>
           );
         })()}
@@ -2433,8 +3008,8 @@ export default function PersonalFinanceDashboard() {
             </Card>
 
             <Card>
-              <CardHeader title="Stipendio" subtitle="Importo netto, mensilità aggiuntive e data di accredito" icon={Briefcase} accentColor="emerald" />
-              <div className="px-5 pb-5 grid grid-cols-1 sm:grid-cols-3 gap-4">
+              <CardHeader title="Stipendio" subtitle="Importo netto, mensilità aggiuntive, RAL e accredito" icon={Briefcase} accentColor="emerald" />
+              <div className="px-5 pb-5 grid grid-cols-1 sm:grid-cols-4 gap-4">
                 <div>
                   <label className="text-xs text-slate-500 font-medium block mb-1.5">Netto mensile</label>
                   <MoneyInput value={config.salary.netAmount} onChange={v => updateConfig({ salary: { ...config.salary, netAmount: safeNum(v) } })} />
@@ -2444,10 +3019,14 @@ export default function PersonalFinanceDashboard() {
                   <MoneyInput value={config.salary.bonusAmount} onChange={v => updateConfig({ salary: { ...config.salary, bonusAmount: safeNum(v) } })} />
                 </div>
                 <div>
+                  <label className="text-xs text-slate-500 font-medium block mb-1.5">RAL (Lordo Annuo)</label>
+                  <MoneyInput value={config.salary.ral} onChange={v => updateConfig({ salary: { ...config.salary, ral: safeNum(v) } })} />
+                </div>
+                <div>
                   <label className="text-xs text-slate-500 font-medium block mb-1.5">Giorno accredito</label>
                   <NumberInput value={config.salary.payDay} onChange={v => updateConfig({ salary: { ...config.salary, payDay: Math.max(1, Math.min(31, v)) } })} min={1} max={31} suffix="del mese" />
                 </div>
-                <div className="sm:col-span-3">
+                <div className="sm:col-span-4">
                   <label className="text-xs text-slate-500 font-medium block mb-2">Mesi bonus</label>
                   <div className="flex gap-1.5 flex-wrap">
                     {MONTHS_IT.map((m, i) => {
@@ -2631,6 +3210,24 @@ export default function PersonalFinanceDashboard() {
                     <div className="text-[10px] font-semibold uppercase tracking-wider text-orange-600 mb-1">Milestone generate</div>
                     <div className="text-sm font-semibold text-slate-900">{MILESTONES.length}</div>
                   </div>
+                </div>
+              </div>
+            </Card>
+
+            <Card>
+              <CardHeader title="Obiettivi e Crescita Patrimoniale" subtitle="Definisci gli obiettivi di crescita del patrimonio e target FIRE" icon={Trophy} accentColor="orange" />
+              <div className="px-5 pb-5 grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                  <label className="text-xs text-slate-500 font-medium block mb-1.5">Crescita annua target (%)</label>
+                  <NumberInput value={config.annualGrowthTarget} onChange={v => updateConfig({ annualGrowthTarget: v })} suffix="%" step={0.5} />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500 font-medium block mb-1.5">FIRE Number Target (€)</label>
+                  <MoneyInput value={config.fireNumber} onChange={v => updateConfig({ fireNumber: safeNum(v) })} />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500 font-medium block mb-1.5">Rendita mensile target (€)</label>
+                  <MoneyInput value={config.monthlyDesiredIncome} onChange={v => updateConfig({ monthlyDesiredIncome: safeNum(v) })} />
                 </div>
               </div>
             </Card>
@@ -3007,6 +3604,145 @@ export default function PersonalFinanceDashboard() {
               <div className="flex gap-2 pt-2">
                 <Button variant="secondary" className="flex-1" onClick={() => setShowFireWizard(false)}>Annulla</Button>
                 <Button variant="primary" className="flex-1" icon={Check} onClick={applyFireWizard}>Salva</Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Add Goal Modal ─── */}
+      {showAddGoal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm" onClick={() => setShowAddGoal(false)}>
+          <div className="bg-white rounded-2xl border border-slate-200 max-w-sm w-full p-6 shadow-xl" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-5">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 bg-indigo-100 text-indigo-600 rounded-lg flex items-center justify-center"><Trophy size={16} /></div>
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-900">Nuovo Obiettivo</h3>
+                  <p className="text-[11px] text-slate-500">Definisci un traguardo patrimoniale</p>
+                </div>
+              </div>
+              <button onClick={() => setShowAddGoal(false)} className="text-slate-400 hover:text-slate-700"><X size={18} /></button>
+            </div>
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs font-medium text-slate-700 block mb-1.5">Titolo obiettivo</label>
+                <input type="text" value={newGoal.title} placeholder="es. Acquisto Auto, Fondo Vacanze..."
+                  onChange={e => setNewGoal({ ...newGoal, title: e.target.value })}
+                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-300 bg-white" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-slate-700 block mb-1.5">Target (€)</label>
+                  <input type="number" value={newGoal.targetAmount} placeholder="es. 15000"
+                    onChange={e => setNewGoal({ ...newGoal, targetAmount: e.target.value })}
+                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-300 bg-white tabular-nums" />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-slate-700 block mb-1.5">Attuale (€)</label>
+                  <input type="number" value={newGoal.currentAmount} placeholder="es. 2000"
+                    onChange={e => setNewGoal({ ...newGoal, currentAmount: e.target.value })}
+                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-300 bg-white tabular-nums" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-slate-700 block mb-1.5">Scadenza</label>
+                  <input type="date" value={newGoal.deadline}
+                    onChange={e => setNewGoal({ ...newGoal, deadline: e.target.value })}
+                    className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-300 bg-white" />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-slate-700 block mb-1.5">Colore</label>
+                  <div className="flex items-center gap-2 mt-1">
+                    {['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ef4444'].map(c => (
+                      <button key={c} onClick={() => setNewGoal({ ...newGoal, color: c })}
+                        className={`w-6 h-6 rounded-full border-2 transition-transform ${newGoal.color === c ? 'scale-110 border-slate-800' : 'border-transparent'}`}
+                        style={{ backgroundColor: c }} />
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <div className="flex gap-2 pt-2">
+                <Button variant="secondary" className="flex-1" onClick={() => setShowAddGoal(false)}>Annulla</Button>
+                <Button variant="primary" className="flex-1" icon={Check} onClick={addGoal} disabled={!newGoal.title || !newGoal.targetAmount}>Aggiungi</Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Add Fon.Te. Contribution Modal ─── */}
+      {showAddContrib && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm" onClick={() => setShowAddContrib(false)}>
+          <div className="bg-white rounded-2xl border border-slate-200 max-w-sm w-full p-6 shadow-xl" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 bg-emerald-100 text-emerald-700 rounded-lg flex items-center justify-center"><Receipt size={16} /></div>
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-900">Registra Versamento Fon.Te.</h3>
+                  <p className="text-[11px] text-slate-500">I contributi aderente sono deducibili</p>
+                </div>
+              </div>
+              <button onClick={() => setShowAddContrib(false)} className="text-slate-400 hover:text-slate-700"><X size={18} /></button>
+            </div>
+            <div className="space-y-3.5">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-slate-700 block mb-1">Anno</label>
+                  <input type="number" value={newContrib.year}
+                    onChange={e => setNewContrib({ ...newContrib, year: parseInt(e.target.value) || cy })}
+                    className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white tabular-nums" />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-slate-700 block mb-1">Trimestre</label>
+                  <select value={newContrib.quarter}
+                    onChange={e => setNewContrib({ ...newContrib, quarter: parseInt(e.target.value) || 1 })}
+                    className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white">
+                    <option value={1}>Q1 (Gen-Mar)</option>
+                    <option value={2}>Q2 (Apr-Giu)</option>
+                    <option value={3}>Q3 (Lug-Set)</option>
+                    <option value={4}>Q4 (Ott-Dic)</option>
+                  </select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-slate-700 block mb-1">Quota Aderente (€)</label>
+                  <input type="number" value={newContrib.aderente} placeholder="0"
+                    onChange={e => setNewContrib({ ...newContrib, aderente: e.target.value })}
+                    className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white tabular-nums" />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-slate-700 block mb-1">Quota Azienda (€)</label>
+                  <input type="number" value={newContrib.azienda} placeholder="0"
+                    onChange={e => setNewContrib({ ...newContrib, azienda: e.target.value })}
+                    className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white tabular-nums" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-medium text-slate-700 block mb-1">TFR (€)</label>
+                  <input type="number" value={newContrib.tfr} placeholder="0"
+                    onChange={e => setNewContrib({ ...newContrib, tfr: e.target.value })}
+                    className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white tabular-nums" />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-slate-700 block mb-1">Volontario (€)</label>
+                  <input type="number" value={newContrib.volontario} placeholder="0"
+                    onChange={e => setNewContrib({ ...newContrib, volontario: e.target.value })}
+                    className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white tabular-nums" />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-700 block mb-1">Welfare (€)</label>
+                <input type="number" value={newContrib.welfare} placeholder="0"
+                  onChange={e => setNewContrib({ ...newContrib, welfare: e.target.value })}
+                  className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white tabular-nums" />
+              </div>
+              <div className="flex gap-2 pt-2">
+                <Button variant="secondary" className="flex-1" onClick={() => setShowAddContrib(false)}>Annulla</Button>
+                <Button variant="primary" className="flex-1" icon={Check} onClick={addFonteContribution}>Registra</Button>
               </div>
             </div>
           </div>
