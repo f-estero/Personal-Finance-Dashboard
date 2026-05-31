@@ -7,7 +7,8 @@ import {
   XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend, BarChart, Bar
 } from 'recharts';
 import {
-  Wallet, TrendingUp, Target, Calendar, CheckCircle2, Clock, AlertCircle,
+  Wallet, TrendingUp, TrendingDown, Target, Calendar, CheckCircle2, Clock, AlertCircle,
+
   PiggyBank, BarChart3, Flame, Flag, Settings as SettingsIcon, History as HistoryIcon,
   Plus, Trash2, Download, Upload, RotateCcw, LayoutDashboard,
   ChevronRight, ChevronDown, Sparkles, Briefcase, ChevronLeft,
