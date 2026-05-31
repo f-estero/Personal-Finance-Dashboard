@@ -217,29 +217,29 @@ export default function MarketTab({ config }: Props) {
 
           return (
             <div key={market.id} className="bg-white rounded-xl border border-slate-200 p-4 flex flex-col justify-between shadow-sm min-w-0 transition-transform duration-200 hover:-translate-y-0.5">
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-sm">{market.icon}</span>
-                    <span className="text-xs font-semibold text-slate-700 truncate">{market.name}</span>
-                  </div>
-                  <span className="text-[9px] text-slate-400 font-mono tracking-wider block mt-0.5">{market.ticker}</span>
+              {/* Sezione Superiore: Icona, Nome ed Exchange Ticker */}
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-sm flex-shrink-0">{market.icon}</span>
+                  <span className="text-xs font-semibold text-slate-700 truncate">{market.name}</span>
                 </div>
-                {isPos !== null && (
-                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-md ${isPos ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>
-                    {fmtPct(q.changePct)}
-                  </span>
-                )}
+                <span className="text-[9px] text-slate-400 font-mono tracking-wider block mt-0.5">{market.ticker}</span>
               </div>
 
-              <div className="mt-3 flex items-end justify-between gap-2">
-                <div>
+              {/* Sezione Inferiore: Prezzo + Badge Variazione (stacked) e Sparkline */}
+              <div className="mt-4 flex items-end justify-between gap-2">
+                <div className="min-w-0">
                   {loading && !q && !err ? (
                     <div className="h-5 w-16 bg-slate-100 rounded animate-pulse" />
                   ) : err ? (
                     <span className="text-[10px] text-slate-400 font-mono">N/D</span>
                   ) : q ? (
-                    <span className="text-sm font-bold text-slate-900 tabular-nums">{fmt2(q.price)}</span>
+                    <div className="flex flex-col">
+                      <span className="text-xs font-bold text-slate-900 tabular-nums truncate">{fmt2(q.price)}</span>
+                      <span className={`inline-flex items-center justify-center gap-0.5 text-[9px] font-bold mt-1.5 tabular-nums px-1.5 py-0.5 rounded ${isPos ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>
+                        {isPos ? '▲' : '▼'} {fmtPct(q.changePct)}
+                      </span>
+                    </div>
                   ) : (
                     <span className="text-xs text-slate-300">...</span>
                   )}
@@ -247,7 +247,9 @@ export default function MarketTab({ config }: Props) {
                 
                 {/* Sparkline dell'indice */}
                 {!err && q?.history && (
-                  <Sparkline data={q.history} isPositive={isPos ?? true} />
+                  <div className="flex-shrink-0">
+                    <Sparkline data={q.history} isPositive={isPos ?? true} />
+                  </div>
                 )}
               </div>
             </div>

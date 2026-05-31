@@ -54,9 +54,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const meta = result.meta
     const quote = result.indicators?.quote?.[0] || {}
 
-    // Estrazione dei parametri finanziari con fallback robusti
+    // Estrazione del prezzo odierno corrente
     const price = meta.regularMarketPrice || meta.previousClose || 0
-    const prevClose = meta.chartPreviousClose || meta.previousClose || 0
+
+    // Estrazione dei prezzi storici degli ultimi 30 giorni (rimuove i valori nulli)
+    const history: number[] = quote.close
+      ? quote.close.filter((v: any) => typeof v === 'number')
+      : []
+
+    // Aggiunge la chiusura del giorno corrente come ultimo punto solo se la differenza è significativa
+    // (evita duplicati dovuti ad arrotondamenti floating-point a mercato chiuso)
+    if (history.length > 0 && Math.abs(history[history.length - 1] - price) > 0.01) {
+      history.push(price)
+    }
+
+    // Calcola il prezzo di chiusura del giorno precedente (ieri) in modo accurato
+    const prevClose = history.length >= 2
+      ? history[history.length - 2]
+      : (meta.chartPreviousClose || meta.previousClose || price)
+
     const change = price - prevClose
     const changePct = prevClose > 0 ? (change / prevClose) * 100 : 0
 
@@ -64,16 +80,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const high = quote.high?.[0] || price
     const low = quote.low?.[0] || price
     const volume = quote.volume?.[0] || meta.regularMarketVolume || 0
-
-    // Estrazione dei prezzi storici degli ultimi 30 giorni (rimuove i valori nulli)
-    const history: number[] = quote.close
-      ? quote.close.filter((v: any) => typeof v === 'number')
-      : []
-
-    // Aggiunge la chiusura del giorno corrente come ultimo punto se necessario
-    if (history.length > 0 && history[history.length - 1] !== price) {
-      history.push(price)
-    }
 
     // Restituisce la risposta nello schema dati originario + array storico a 30d
     return res.status(200).json({
