@@ -3079,6 +3079,7 @@ export default function PersonalFinanceDashboard() {
         {/* ═══════════ SETTINGS ═══════════ */}
         {tab === 'settings' && (
           <div className="space-y-5">
+            {/* 1. Profilo */}
             <Card>
               <CardHeader title="Profilo" icon={Briefcase} accentColor="slate" />
               <div className="px-5 pb-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -3095,6 +3096,7 @@ export default function PersonalFinanceDashboard() {
               </div>
             </Card>
 
+            {/* 2. Stipendio */}
             <Card>
               <CardHeader title="Stipendio" subtitle="Importo netto, mensilità aggiuntive, RAL e accredito" icon={Briefcase} accentColor="emerald" />
               <div className="px-5 pb-5 grid grid-cols-1 sm:grid-cols-4 gap-4">
@@ -3133,6 +3135,126 @@ export default function PersonalFinanceDashboard() {
               </div>
             </Card>
 
+            {/* 3. Spese fisse */}
+            <Card>
+              <CardHeader title="Spese fisse mensili"
+                subtitle={totalFixedExpenses > 0 ? `Totale ${fmt(totalFixedExpenses)}/mese · Margine reale ${fmt(realMargin)}` : 'Configura le tue uscite ricorrenti'}
+                icon={Home} accentColor="rose" />
+              <div className="px-5 pb-5 space-y-3">
+                {Object.entries(config.expenses || {}).map(([key, exp]: [string, any]) => {
+                  const Icon = EXPENSE_ICONS[exp.icon] || Home;
+                  return (
+                    <div key={key} className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-slate-100 text-slate-600 flex items-center justify-center flex-shrink-0">
+                        <Icon size={15} />
+                      </div>
+                      <span className="text-sm text-slate-700 flex-1">{exp.label}</span>
+                      <MoneyInput
+                        size="sm"
+                        className="w-32"
+                        value={exp.amount || ''}
+                        onChange={v => updateConfig({
+                          expenses: {
+                            ...config.expenses,
+                            [key]: { ...exp, amount: safeNum(v) }
+                          }
+                        })}
+                      />
+                    </div>
+                  );
+                })}
+                <div className="flex justify-between items-center pt-2 border-t border-slate-100 text-xs">
+                  <span className="text-slate-500">Totale spese fisse</span>
+                  <span className="font-semibold tabular-nums text-rose-700">{fmt(totalFixedExpenses)}/mese</span>
+                </div>
+                {totalFixedExpenses > 0 && (
+                  <div className={`rounded-lg p-2.5 text-xs flex items-center gap-2 ${realMargin >= 0 ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'}`}>
+                    {realMargin >= 0
+                      ? <><CheckCircle2 size={13} className="text-emerald-600 flex-shrink-0" /><span>Margine mensile dopo PAC: <strong>{fmt(realMargin)}</strong></span></>
+                      : <><AlertCircle size={13} className="text-amber-600 flex-shrink-0" /><span>PAC sovradimensionato di <strong>{fmt(Math.abs(realMargin))}</strong> rispetto alle entrate disponibili</span></>
+                    }
+                  </div>
+                )}
+                <p className="text-[11px] text-slate-400">Le spese fisse sono automaticamente dedotte dal cashflow. Non richiedono conferma mensile.</p>
+              </div>
+            </Card>
+
+            {/* 4. Spese Variabili */}
+            <Card>
+              <CardHeader title="Spese Variabili Stimate" subtitle="Budget mensile stimato per evitare sovrastime della liquidità cashflow" icon={Receipt} accentColor="rose" />
+              <div className="px-5 pb-5 grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                  <label className="text-xs text-slate-500 font-medium block mb-1.5">Spesa e Alimentari (€/mese)</label>
+                  <MoneyInput value={config.variableExpenses?.spesa?.amount ?? 150} onChange={v => updateConfig({
+                    variableExpenses: {
+                      ...config.variableExpenses,
+                      spesa: { ...config.variableExpenses?.spesa, amount: safeNum(v) }
+                    }
+                  })} />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500 font-medium block mb-1.5">Benzina e Trasporti (€/mese)</label>
+                  <MoneyInput value={config.variableExpenses?.trasporti?.amount ?? 100} onChange={v => updateConfig({
+                    variableExpenses: {
+                      ...config.variableExpenses,
+                      trasporti: { ...config.variableExpenses?.trasporti, amount: safeNum(v) }
+                    }
+                  })} />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500 font-medium block mb-1.5">Svago ed Extra (€/mese)</label>
+                  <MoneyInput value={config.variableExpenses?.extra?.amount ?? 100} onChange={v => updateConfig({
+                    variableExpenses: {
+                      ...config.variableExpenses,
+                      extra: { ...config.variableExpenses?.extra, amount: safeNum(v) }
+                    }
+                  })} />
+                </div>
+              </div>
+            </Card>
+
+            {/* 5. Sistema a cascata */}
+            <Card>
+              <CardHeader title="Cap sistema a cascata" icon={Wallet} accentColor="amber" />
+              <div className="px-5 pb-5 space-y-2">
+                {config.waterfallLevels.map((lv, idx) => (
+                  <div key={lv.id} className="flex items-center gap-2">
+                    <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: lv.color }} />
+                    <input type="text" value={lv.name}
+                      onChange={e => {
+                        const newLv = [...config.waterfallLevels];
+                        newLv[idx] = { ...newLv[idx], name: e.target.value };
+                        updateConfig({ waterfallLevels: newLv });
+                      }}
+                      className="flex-1 px-2.5 py-1.5 text-sm border border-slate-200 rounded-lg bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-300" />
+                    <MoneyInput value={lv.cap} className="w-32" onChange={v => {
+                      const newLv = [...config.waterfallLevels];
+                      newLv[idx] = { ...newLv[idx], cap: safeNum(v) };
+                      updateConfig({ waterfallLevels: newLv });
+                    }} />
+                  </div>
+                ))}
+                <p className="text-[11px] text-slate-500 pt-1">Cap = 0 significa nessun limite (livello overflow).</p>
+              </div>
+            </Card>
+
+            {/* 6. Conto Deposito Svincolato */}
+            <Card>
+              <CardHeader title="Conto Deposito Svincolato" subtitle="Liquidità fruttifera a basso rischio per far maturare piccoli interessi" icon={PiggyBank} accentColor="amber" />
+              <div className="px-5 pb-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs text-slate-500 font-medium block mb-1.5">Quota in Conto Deposito (€)</label>
+                  <MoneyInput value={config.contoDepositoAmount ?? 0} onChange={v => updateConfig({ contoDepositoAmount: safeNum(v) })} />
+                  <p className="text-[10px] text-slate-400 mt-1">Quota massima consigliata: {fmt(totalLiq)} (tutta la liquidità)</p>
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500 font-medium block mb-1.5">Tasso d'interesse annuo lordo (%)</label>
+                  <NumberInput value={config.contoDepositoRate ?? 1.5} onChange={v => updateConfig({ contoDepositoRate: v })} suffix="%" step={0.1} />
+                </div>
+              </div>
+            </Card>
+
+            {/* 7. PAC */}
             <Card>
               <CardHeader title="PAC" subtitle="Versamento ricorrente e allocazione strumenti" icon={CreditCard} accentColor="indigo" />
               <div className="px-5 pb-5">
@@ -3195,6 +3317,7 @@ export default function PersonalFinanceDashboard() {
               </div>
             </Card>
 
+            {/* 8. Previdenza Complementare (Fon.Te.) */}
             <Card>
               <CardHeader title="Fon.Te." subtitle="Previdenza complementare" icon={PiggyBank} accentColor="purple" />
               <div className="px-5 pb-5 grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -3214,70 +3337,22 @@ export default function PersonalFinanceDashboard() {
               </div>
             </Card>
 
+            {/* 9. Obiettivi e Crescita */}
             <Card>
-              <CardHeader title="Spese fisse mensili"
-                subtitle={totalFixedExpenses > 0 ? `Totale ${fmt(totalFixedExpenses)}/mese · Margine reale ${fmt(realMargin)}` : 'Configura le tue uscite ricorrenti'}
-                icon={Home} accentColor="rose" />
-              <div className="px-5 pb-5 space-y-3">
-                {Object.entries(config.expenses || {}).map(([key, exp]: [string, any]) => {
-                  const Icon = EXPENSE_ICONS[exp.icon] || Home;
-                  return (
-                    <div key={key} className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-lg bg-slate-100 text-slate-600 flex items-center justify-center flex-shrink-0">
-                        <Icon size={15} />
-                      </div>
-                      <span className="text-sm text-slate-700 flex-1">{exp.label}</span>
-                      <MoneyInput
-                        size="sm"
-                        className="w-32"
-                        value={exp.amount || ''}
-                        onChange={v => updateConfig({
-                          expenses: {
-                            ...config.expenses,
-                            [key]: { ...exp, amount: safeNum(v) }
-                          }
-                        })}
-                      />
-                    </div>
-                  );
-                })}
-                <div className="flex justify-between items-center pt-2 border-t border-slate-100 text-xs">
-                  <span className="text-slate-500">Totale spese fisse</span>
-                  <span className="font-semibold tabular-nums text-rose-700">{fmt(totalFixedExpenses)}/mese</span>
+              <CardHeader title="Obiettivi e Crescita Patrimoniale" subtitle="Definisci gli obiettivi di crescita del patrimonio e target FIRE" icon={Trophy} accentColor="orange" />
+              <div className="px-5 pb-5 grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                  <label className="text-xs text-slate-500 font-medium block mb-1.5">Crescita annua target (%)</label>
+                  <NumberInput value={config.annualGrowthTarget} onChange={v => updateConfig({ annualGrowthTarget: v })} suffix="%" step={0.5} />
                 </div>
-                {totalFixedExpenses > 0 && (
-                  <div className={`rounded-lg p-2.5 text-xs flex items-center gap-2 ${realMargin >= 0 ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'}`}>
-                    {realMargin >= 0
-                      ? <><CheckCircle2 size={13} className="text-emerald-600 flex-shrink-0" /><span>Margine mensile dopo PAC: <strong>{fmt(realMargin)}</strong></span></>
-                      : <><AlertCircle size={13} className="text-amber-600 flex-shrink-0" /><span>PAC sovradimensionato di <strong>{fmt(Math.abs(realMargin))}</strong> rispetto alle entrate disponibili</span></>
-                    }
-                  </div>
-                )}
-                <p className="text-[11px] text-slate-400">Le spese fisse sono automaticamente dedotte dal cashflow. Non richiedono conferma mensile.</p>
-              </div>
-            </Card>
-
-            <Card>
-              <CardHeader title="Cap sistema a cascata" icon={Wallet} accentColor="amber" />
-              <div className="px-5 pb-5 space-y-2">
-                {config.waterfallLevels.map((lv, idx) => (
-                  <div key={lv.id} className="flex items-center gap-2">
-                    <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: lv.color }} />
-                    <input type="text" value={lv.name}
-                      onChange={e => {
-                        const newLv = [...config.waterfallLevels];
-                        newLv[idx] = { ...newLv[idx], name: e.target.value };
-                        updateConfig({ waterfallLevels: newLv });
-                      }}
-                      className="flex-1 px-2.5 py-1.5 text-sm border border-slate-200 rounded-lg bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-300" />
-                    <MoneyInput value={lv.cap} className="w-32" onChange={v => {
-                      const newLv = [...config.waterfallLevels];
-                      newLv[idx] = { ...newLv[idx], cap: safeNum(v) };
-                      updateConfig({ waterfallLevels: newLv });
-                    }} />
-                  </div>
-                ))}
-                <p className="text-[11px] text-slate-500 pt-1">Cap = 0 significa nessun limite (livello overflow).</p>
+                <div>
+                  <label className="text-xs text-slate-500 font-medium block mb-1.5">FIRE Number Target (€)</label>
+                  <MoneyInput value={config.fireNumber} onChange={v => updateConfig({ fireNumber: safeNum(v) })} />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500 font-medium block mb-1.5">Rendita mensile target (€)</label>
+                  <MoneyInput value={config.monthlyDesiredIncome} onChange={v => updateConfig({ monthlyDesiredIncome: safeNum(v) })} />
+                </div>
               </div>
             </Card>
 
@@ -3302,72 +3377,7 @@ export default function PersonalFinanceDashboard() {
               </div>
             </Card>
 
-            <Card>
-              <CardHeader title="Obiettivi e Crescita Patrimoniale" subtitle="Definisci gli obiettivi di crescita del patrimonio e target FIRE" icon={Trophy} accentColor="orange" />
-              <div className="px-5 pb-5 grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div>
-                  <label className="text-xs text-slate-500 font-medium block mb-1.5">Crescita annua target (%)</label>
-                  <NumberInput value={config.annualGrowthTarget} onChange={v => updateConfig({ annualGrowthTarget: v })} suffix="%" step={0.5} />
-                </div>
-                <div>
-                  <label className="text-xs text-slate-500 font-medium block mb-1.5">FIRE Number Target (€)</label>
-                  <MoneyInput value={config.fireNumber} onChange={v => updateConfig({ fireNumber: safeNum(v) })} />
-                </div>
-                <div>
-                  <label className="text-xs text-slate-500 font-medium block mb-1.5">Rendita mensile target (€)</label>
-                  <MoneyInput value={config.monthlyDesiredIncome} onChange={v => updateConfig({ monthlyDesiredIncome: safeNum(v) })} />
-                </div>
-              </div>
-            </Card>
-
-            <Card>
-              <CardHeader title="Spese Variabili Stimate" subtitle="Budget mensile stimato per evitare sovrastime della liquidità cashflow" icon={Receipt} accentColor="rose" />
-              <div className="px-5 pb-5 grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div>
-                  <label className="text-xs text-slate-500 font-medium block mb-1.5">Spesa e Alimentari (€/mese)</label>
-                  <MoneyInput value={config.variableExpenses?.spesa?.amount ?? 150} onChange={v => updateConfig({
-                    variableExpenses: {
-                      ...config.variableExpenses,
-                      spesa: { ...config.variableExpenses?.spesa, amount: safeNum(v) }
-                    }
-                  })} />
-                </div>
-                <div>
-                  <label className="text-xs text-slate-500 font-medium block mb-1.5">Benzina e Trasporti (€/mese)</label>
-                  <MoneyInput value={config.variableExpenses?.trasporti?.amount ?? 100} onChange={v => updateConfig({
-                    variableExpenses: {
-                      ...config.variableExpenses,
-                      trasporti: { ...config.variableExpenses?.trasporti, amount: safeNum(v) }
-                    }
-                  })} />
-                </div>
-                <div>
-                  <label className="text-xs text-slate-500 font-medium block mb-1.5">Svago ed Extra (€/mese)</label>
-                  <MoneyInput value={config.variableExpenses?.extra?.amount ?? 100} onChange={v => updateConfig({
-                    variableExpenses: {
-                      ...config.variableExpenses,
-                      extra: { ...config.variableExpenses?.extra, amount: safeNum(v) }
-                    }
-                  })} />
-                </div>
-              </div>
-            </Card>
-
-            <Card>
-              <CardHeader title="Conto Deposito Svincolato" subtitle="Liquidità fruttifera a basso rischio per far maturare piccoli interessi" icon={PiggyBank} accentColor="amber" />
-              <div className="px-5 pb-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="text-xs text-slate-500 font-medium block mb-1.5">Quota in Conto Deposito (€)</label>
-                  <MoneyInput value={config.contoDepositoAmount ?? 0} onChange={v => updateConfig({ contoDepositoAmount: safeNum(v) })} />
-                  <p className="text-[10px] text-slate-400 mt-1">Quota massima consigliata: {fmt(totalLiq)} (tutta la liquidità)</p>
-                </div>
-                <div>
-                  <label className="text-xs text-slate-500 font-medium block mb-1.5">Tasso d'interesse annuo lordo (%)</label>
-                  <NumberInput value={config.contoDepositoRate ?? 1.5} onChange={v => updateConfig({ contoDepositoRate: v })} suffix="%" step={0.1} />
-                </div>
-              </div>
-            </Card>
-
+            {/* 10. Gestione dati */}
             <Card>
               <CardHeader title="Gestione dati" subtitle="Backup, ripristino e reset" icon={FileText} accentColor="rose" />
               <div className="px-5 pb-5">
@@ -3386,6 +3396,7 @@ export default function PersonalFinanceDashboard() {
               </div>
             </Card>
 
+            {/* 11. Privacy & Account */}
             <Card>
               <CardHeader title="Privacy & Account" subtitle="Diritti GDPR e cancellazione account" icon={Shield} accentColor="slate" />
               <div className="px-5 pb-5 space-y-3">
