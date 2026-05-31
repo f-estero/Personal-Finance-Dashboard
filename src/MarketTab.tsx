@@ -90,7 +90,7 @@ export default function MarketTab({ config }: Props) {
         <div>
           <h2 className="text-base font-semibold text-slate-900">Prezzi di mercato</h2>
           <p className="text-xs text-slate-500">
-            {lastFetch ? `Aggiornato alle ${lastFetch}` : 'Dati in tempo reale · Yahoo Finance'}
+            {lastFetch ? `Aggiornato alle ${lastFetch}` : 'Dati in tempo reale · Financial Modeling Prep'}
           </p>
         </div>
         <button
@@ -182,9 +182,9 @@ export default function MarketTab({ config }: Props) {
           {lastFetch && (
             <div className="px-5 py-3 bg-slate-50 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400">
               <span>Dati: {quotes[tickeredInstruments[0]?.id]?.updatedAt || '—'}</span>
-              <a href="https://finance.yahoo.com" target="_blank" rel="noopener noreferrer"
+              <a href="https://financialmodelingprep.com" target="_blank" rel="noopener noreferrer"
                 className="flex items-center gap-1 hover:text-slate-600">
-                Yahoo Finance <ExternalLink size={10} />
+                Financial Modeling Prep <ExternalLink size={10} />
               </a>
             </div>
           )}
@@ -195,7 +195,7 @@ export default function MarketTab({ config }: Props) {
       <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 flex items-start gap-2.5">
         <Info size={16} className="text-emerald-600 flex-shrink-0 mt-0.5" />
         <div className="text-xs text-emerald-900">
-          <strong>Yahoo Finance:</strong> Gratuito, illimitato, senza API key.
+          <strong>Financial Modeling Prep:</strong> 250 richieste/giorno.
           Funziona con qualsiasi ticker: VUSA.LON, VOO, SPY, VXUS, ecc.
           Prezzi in tempo reale durante gli orari di borsa.
         </div>
