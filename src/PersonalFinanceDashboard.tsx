@@ -32,41 +32,23 @@ const DEFAULT_CONFIG = {
   profile: { name: '', birthYear: new Date().getFullYear() - 30 },
   salary: { netAmount: 0, bonusAmount: 0, bonusMonths: [], payDay: 27, ral: 0 },
   pac: {
-    monthlyAmount: 1000, payDay: 1, broker: 'Fineco',
-    instruments: [
-      { id: 'ins1', name: 'Vanguard S&P 500', pct: 45, ter: 0.07, color: '#3b82f6', ticker: 'VUSA.LON', isin: 'IE00B3XXRP09' },
-      { id: 'ins2', name: 'iShares MSCI World ex-USA', pct: 35, ter: 0.15, color: '#10b981', ticker: 'XUSE.FRA', isin: 'IE00B4L60045' },
-      { id: 'ins3', name: 'Xtrackers MSCI Emerging Markets', pct: 15, ter: 0.18, color: '#f59e0b', ticker: 'XMEM.FRA', isin: 'IE00BTJRMP35' },
-      { id: 'ins4', name: 'iShares Physical Gold ETC', pct: 5, ter: 0.12, color: '#eab308', ticker: 'IGLN.LON', isin: 'IE00B1XNRC02' },
-    ]
+    monthlyAmount: 0, payDay: 1, broker: '',
+    instruments: []
   },
   marketApiKey: '',
-  fonte: { monthlyContribution: 0, ter: 0, comparto: '', contributions: [], annualDeductibleOverride: null },
-  expenses: {
-    affitto:       { amount: 0, label: 'Affitto',       icon: 'home'    },
-    utenze:        { amount: 0, label: 'Utenze',        icon: 'zap'     },
-    abbonamenti:   { amount: 0, label: 'Abbonamenti',   icon: 'tv'      },
-    assicurazioni: { amount: 0, label: 'Assicurazioni', icon: 'shield'  },
-    telefono:      { amount: 0, label: 'Telefono',      icon: 'phone'   },
-    istruzione:    { amount: 0, label: 'Istruzione/Università', icon: 'istruzione' },
-  },
+  fonte: { monthlyContribution: 0, ter: 0, name: 'Fondo Pensione', allocation: 'Personalizzato', comparto: '', contributions: [], annualDeductibleOverride: null },
+  expenses: {},
   waterfallLevels: [
     { id: 'l1', name: 'Riserva di Emergenza',  desc: 'Imprevisti e spese straordinarie', cap: 0, color: '#10b981', icon: 'shield' },
-    { id: 'l2', name: 'Fondo Lifestyle',       desc: 'Viaggi, svago, spese voluttuarie',  cap: 0, color: '#3b82f6', icon: 'coffee' },
-    { id: 'l3', name: 'Liquidità Operativa',   desc: 'Spese mensili correnti',            cap: 0, color: '#f59e0b', icon: 'zap' },
-    { id: 'l4', name: 'Overflow → Investimenti', desc: 'Eccedenza da investire',          cap: 0, color: '#6366f1', icon: 'rocket' },
   ],
   // Obiettivi e FIRE
   goals: [],
+  customMilestones: [],
   annualGrowthTarget: 0,
   fireNumber: 0,
   monthlyDesiredIncome: 0,
   darkMode: false,
-  variableExpenses: {
-    spesa:     { amount: 150, label: 'Spesa e Alimentari' },
-    trasporti: { amount: 100, label: 'Benzina e Trasporti' },
-    extra:     { amount: 100, label: 'Svago ed Extra' },
-  },
+  variableExpenses: {},
   contoDepositoAmount: 0,
   contoDepositoRate: 1.5,
 };
@@ -78,7 +60,7 @@ const DEFAULT_STATE = {
   fonteValueUpdatedAt: null,
   instrumentValues: {},
   instrumentValuesUpdatedAt: null,
-  waterfallCurrent: { l1: 0, l2: 0, l3: 0, l4: 0 },
+  waterfallCurrent: { l1: 0 },
   events: {},
   ledger: {},
   snapshots: [],
@@ -399,6 +381,8 @@ export default function PersonalFinanceDashboard() {
   // Goals & Fon.Te. contributions UI
   const [showAddGoal, setShowAddGoal] = useState(false);
   const [newGoal, setNewGoal] = useState({ title: '', targetAmount: '', currentAmount: '', deadline: '', color: '#3b82f6' });
+  const [newMsLabel, setNewMsLabel] = useState('');
+  const [newMsAmount, setNewMsAmount] = useState('');
   const [showAddContrib, setShowAddContrib] = useState(false);
   const [newContrib, setNewContrib] = useState({ year: new Date().getFullYear(), quarter: 1, aderente: '', azienda: '', tfr: '', volontario: '', welfare: '' });
 
@@ -434,6 +418,8 @@ export default function PersonalFinanceDashboard() {
               fonte: {
                 monthlyContribution: safeNum(rawC.fonte?.monthlyContribution, DEFAULT_CONFIG.fonte.monthlyContribution),
                 ter: safeNum(rawC.fonte?.ter, DEFAULT_CONFIG.fonte.ter),
+                name: rawC.fonte?.name ?? DEFAULT_CONFIG.fonte.name,
+                allocation: rawC.fonte?.allocation ?? DEFAULT_CONFIG.fonte.allocation,
                 comparto: rawC.fonte?.comparto ?? DEFAULT_CONFIG.fonte.comparto,
                 contributions: Array.isArray(rawC.fonte?.contributions) ? rawC.fonte.contributions : DEFAULT_CONFIG.fonte.contributions,
                 annualDeductibleOverride: rawC.fonte?.annualDeductibleOverride !== undefined ? rawC.fonte.annualDeductibleOverride : DEFAULT_CONFIG.fonte.annualDeductibleOverride,
@@ -446,18 +432,11 @@ export default function PersonalFinanceDashboard() {
                 : DEFAULT_CONFIG.variableExpenses,
               waterfallLevels: Array.isArray(rawC.waterfallLevels) ? rawC.waterfallLevels : DEFAULT_CONFIG.waterfallLevels,
               goals: Array.isArray(rawC.goals) ? rawC.goals : DEFAULT_CONFIG.goals,
+              customMilestones: Array.isArray(rawC.customMilestones) ? rawC.customMilestones : DEFAULT_CONFIG.customMilestones,
               darkMode: typeof rawC.darkMode === 'boolean' ? rawC.darkMode : DEFAULT_CONFIG.darkMode,
               contoDepositoAmount: safeNum(rawC.contoDepositoAmount, DEFAULT_CONFIG.contoDepositoAmount),
               contoDepositoRate: safeNum(rawC.contoDepositoRate, DEFAULT_CONFIG.contoDepositoRate),
             };
-
-            const insts = loadedConfig.pac.instruments || [];
-            if (insts.length === 0 || (insts.length === 1 && (insts[0].name === 'ETF 1' || insts[0].name === 'Strumento 1'))) {
-              loadedConfig.pac.instruments = DEFAULT_CONFIG.pac.instruments;
-              if (loadedConfig.pac.monthlyAmount === 0 || loadedConfig.pac.monthlyAmount === 100) {
-                loadedConfig.pac.monthlyAmount = 1000;
-              }
-            }
 
             // Garanzia assoluta che ogni strumento abbia un ID univoco
             loadedConfig.pac.instruments = loadedConfig.pac.instruments.map((ins: any, idx: number) => ({
@@ -608,6 +587,159 @@ export default function PersonalFinanceDashboard() {
     setToast({ message: 'Obiettivo rimosso', type: 'info' });
   };
 
+  // ─── ETF PAC Helpers ───
+  const addInstrument = () => {
+    const HSL_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#6366f1', '#ec4899', '#f43f5e', '#14b8a6', '#06b6d4', '#84cc16'];
+    const existingColors = (config.pac.instruments || []).map((i: any) => i.color);
+    const availableColor = HSL_COLORS.find(c => !existingColors.includes(c)) || HSL_COLORS[(config.pac.instruments || []).length % HSL_COLORS.length];
+    const newIns = {
+      id: 'ins_' + Date.now() + '_' + Math.round(Math.random()*1000),
+      name: `Strumento ${(config.pac.instruments || []).length + 1}`,
+      pct: 0,
+      ter: 0.15,
+      color: availableColor,
+      ticker: '',
+      isin: ''
+    };
+    updateConfig({ pac: { ...config.pac, instruments: [...(config.pac.instruments || []), newIns] } });
+    setToast({ message: 'Strumento aggiunto al PAC', type: 'success' });
+  };
+
+  const deleteInstrument = (id: string) => {
+    const newIns = (config.pac.instruments || []).filter((i: any) => i.id !== id);
+    updateConfig({ pac: { ...config.pac, instruments: newIns } });
+    const newVals = { ...state.instrumentValues };
+    delete newVals[id];
+    updateState({ instrumentValues: newVals });
+    setToast({ message: 'Strumento rimosso dal PAC', type: 'info' });
+  };
+
+  // ─── Spese Fisse Helpers ───
+  const addFixedExpense = () => {
+    const newKey = 'exp_' + Date.now() + '_' + Math.round(Math.random()*1000);
+    const newExp = {
+      amount: 0,
+      label: 'Nuova Spesa Fissa',
+      icon: 'home'
+    };
+    updateConfig({
+      expenses: {
+        ...(config.expenses || {}),
+        [newKey]: newExp
+      }
+    });
+    setToast({ message: 'Spesa fissa aggiunta', type: 'success' });
+  };
+
+  const deleteFixedExpense = (key: string) => {
+    const newExpenses = { ...config.expenses };
+    delete newExpenses[key];
+    updateConfig({ expenses: newExpenses });
+    setToast({ message: 'Spesa fissa rimossa', type: 'info' });
+  };
+
+  // ─── Spese Variabili Helpers ───
+  const addVariableExpense = () => {
+    const newKey = 'var_' + Date.now() + '_' + Math.round(Math.random()*1000);
+    const newVar = {
+      amount: 0,
+      label: 'Nuova Spesa Variabile'
+    };
+    updateConfig({
+      variableExpenses: {
+        ...(config.variableExpenses || {}),
+        [newKey]: newVar
+      }
+    });
+    setToast({ message: 'Spesa variabile aggiunta', type: 'success' });
+  };
+
+  const deleteVariableExpense = (key: string) => {
+    const newVars = { ...config.variableExpenses };
+    delete newVars[key];
+    updateConfig({ variableExpenses: newVars });
+    setToast({ message: 'Spesa variabile rimossa', type: 'info' });
+  };
+
+  // ─── Waterfall Levels Helpers ───
+  const addWaterfallLevel = () => {
+    const HSL_COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#6366f1', '#8b5cf6', '#ec4899', '#f43f5e', '#14b8a6', '#06b6d4', '#84cc16'];
+    const existingColors = (config.waterfallLevels || []).map((l: any) => l.color);
+    const availableColor = HSL_COLORS.find(c => !existingColors.includes(c)) || HSL_COLORS[(config.waterfallLevels || []).length % HSL_COLORS.length];
+    const newLv = {
+      id: 'lv_' + Date.now() + '_' + Math.round(Math.random()*1000),
+      name: `Fondo Personalizzato ${(config.waterfallLevels || []).length + 1}`,
+      desc: 'Scopo del fondo',
+      cap: 1000,
+      color: availableColor,
+      icon: 'coffee'
+    };
+    
+    const currentLevels = [...(config.waterfallLevels || [])];
+    let newLevels = [];
+    if (currentLevels.length > 0) {
+      newLevels = [
+        ...currentLevels.slice(0, currentLevels.length - 1),
+        newLv,
+        currentLevels[currentLevels.length - 1]
+      ];
+    } else {
+      newLv.cap = 0;
+      newLevels = [newLv];
+    }
+    
+    newLevels = newLevels.map((l, idx) => ({
+      ...l,
+      cap: idx === newLevels.length - 1 ? 0 : (l.cap === 0 ? 1000 : l.cap)
+    }));
+
+    updateConfig({ waterfallLevels: newLevels });
+    setToast({ message: 'Buffer aggiunto al waterfall', type: 'success' });
+  };
+
+  const deleteWaterfallLevel = (id: string) => {
+    const currentLevels = (config.waterfallLevels || []).filter((l: any) => l.id !== id);
+    if (currentLevels.length === 0) {
+      setToast({ message: 'Deve rimanere almeno un livello nel waterfall', type: 'error' });
+      return;
+    }
+    const newLevels = currentLevels.map((l, idx) => ({
+      ...l,
+      cap: idx === currentLevels.length - 1 ? 0 : (l.cap === 0 ? 1000 : l.cap)
+    }));
+    updateConfig({ waterfallLevels: newLevels });
+
+    const newWfCurrent = { ...state.waterfallCurrent };
+    delete newWfCurrent[id];
+    updateState({ waterfallCurrent: newWfCurrent });
+
+    setToast({ message: 'Buffer rimosso dal waterfall', type: 'info' });
+  };
+
+  // ─── Custom Milestones Helpers ───
+  const addCustomMilestone = () => {
+    if (!newMsLabel.trim() || !newMsAmount) return;
+    const amount = safeNum(newMsAmount);
+    if (amount <= 0) {
+      setToast({ message: 'Importo target non valido', type: 'error' });
+      return;
+    }
+    const newMs = {
+      id: 'ms_' + Date.now(),
+      label: newMsLabel.trim(),
+      targetAmount: amount
+    };
+    updateConfig({ customMilestones: [...(config.customMilestones || []), newMs] });
+    setNewMsLabel('');
+    setNewMsAmount('');
+    setToast({ message: 'Milestone personalizzata aggiunta', type: 'success' });
+  };
+
+  const deleteCustomMilestone = (id: string) => {
+    updateConfig({ customMilestones: (config.customMilestones || []).filter((m: any) => m.id !== id) });
+    setToast({ message: 'Milestone personalizzata rimossa', type: 'info' });
+  };
+
   const addFonteContribution = () => {
     const aderente = safeNum(newContrib.aderente);
     const azienda = safeNum(newContrib.azienda);
@@ -745,7 +877,7 @@ export default function PersonalFinanceDashboard() {
         });
 
         updateConfig({ fonte: { ...config.fonte, contributions: currentContribs } });
-        setToast({ message: `Importati con successo ${importCount} contributi Fon.Te.!`, type: 'success' });
+        setToast({ message: `Importati con successo ${importCount} contributi ${config.fonte.name || 'Fondo Pensione'}!`, type: 'success' });
       } catch (err) {
         console.error(err);
         setToast({ message: 'Errore durante la lettura del file Excel', type: 'error' });
@@ -1380,10 +1512,11 @@ export default function PersonalFinanceDashboard() {
     const etfPct = netWorth > 0 ? (state.etfValue / netWorth) * 100 : 0;
     const fontePct = netWorth > 0 ? (state.fonteValue / netWorth) * 100 : 0;
     const cashPct = netWorth > 0 ? (totalLiq / netWorth) * 100 : 0;
+    const fonteName = config.fonte.name || 'Previdenza';
     return {
       pie: [
         { name: 'ETF', value: state.etfValue, pct: etfPct, color: '#3b82f6' },
-        { name: 'Fon.Te.', value: state.fonteValue, pct: fontePct, color: '#8b5cf6' },
+        { name: fonteName, value: state.fonteValue, pct: fontePct, color: '#8b5cf6' },
         { name: 'Liquidità', value: totalLiq, pct: cashPct, color: '#f59e0b' },
       ].filter(d => d.value > 0),
       stacked: [...state.snapshots]
@@ -1392,11 +1525,11 @@ export default function PersonalFinanceDashboard() {
         .map(s => ({
           date: s.date,
           ETF: s.etf || 0,
-          'Fon.Te.': s.fonte || 0,
+          [fonteName]: s.fonte || 0,
           'Liquidità': s.liq || 0,
         })),
     };
-  }, [state.etfValue, state.fonteValue, totalLiq, netWorth, state.snapshots]);
+  }, [state.etfValue, state.fonteValue, totalLiq, netWorth, state.snapshots, config.fonte.name]);
 
   // ─── FIRE progress ───
   const fireProgress = useMemo(() => {
@@ -1566,17 +1699,26 @@ export default function PersonalFinanceDashboard() {
       });
     });
 
-    // 2. Aggiungiamo traguardi basati su cifre tonde di capitale (Milestone di Capitale)
-    // Selezioniamo soglie sensate in base al capitale attuale dell'utente
+    // 2. Generazione dinamica di traguardi di capitale basati sul patrimonio dell'utente
     const currentCapital = state.etfValue;
-    const thresholds = [25000, 50000, 75000, 100000, 150000, 200000, 250000, 300000, 400000, 500000, 750000, 1000000];
+    const fireBaseTarget = config.fireNumber || (config.monthlyDesiredIncome > 0 ? config.monthlyDesiredIncome * 12 / 0.04 : 500000);
+    
+    const thresholds: number[] = [];
+    let step = 10000;
+    if (currentCapital >= 500000) step = 100000;
+    else if (currentCapital >= 100000) step = 50000;
+    else if (currentCapital >= 50000) step = 25000;
+    
+    let currentVal = Math.floor(currentCapital / step) * step + step;
+    while (currentVal <= fireBaseTarget * 1.5 && thresholds.length < 5) {
+      thresholds.push(currentVal);
+      currentVal += step;
+    }
     
     // Trova i traguardi successivi non ancora raggiunti
     const futureThresholds = thresholds.filter(t => t > currentCapital);
 
-    // Prendiamo i prossimi 4 traguardi futuri per non sovraffollare la lista
-    futureThresholds.slice(0, 4).forEach(targetVal => {
-      // Calcola i mesi necessari
+    futureThresholds.forEach(targetVal => {
       const startVal = state.etfValue;
       let months = 0;
       if (startVal < targetVal) {
@@ -1593,7 +1735,6 @@ export default function PersonalFinanceDashboard() {
         const yearsInt = Math.floor(yearsFloat);
         const milestoneAge = currentAge + yearsInt;
         
-        // Evitiamo di sovraffollare o sovrapporci al target FIRE
         if (milestoneAge >= targetAge) return;
 
         const fonteVal = calcFV(state.fonteValue, fonte, fonteRate, months);
@@ -1608,7 +1749,38 @@ export default function PersonalFinanceDashboard() {
       }
     });
 
-    // 3. Aggiungiamo il traguardo principale FIRE (età target)
+    // 3. Aggiunta delle Milestone Personalizzate create dall'utente
+    (config.customMilestones || []).forEach((cm: any) => {
+      const targetVal = cm.targetAmount;
+      const startVal = state.etfValue;
+      let months = 0;
+      if (startVal < targetVal) {
+        const r = rate / 12 / 100;
+        let projected = startVal;
+        while (projected < targetVal && months < 600) {
+          projected = projected * (1 + r) + pac;
+          months++;
+        }
+      }
+      
+      const yearsFloat = months / 12;
+      const yearsInt = Math.floor(yearsFloat);
+      const milestoneAge = currentAge + yearsInt;
+      const fonteVal = calcFV(state.fonteValue, fonte, fonteRate, months);
+      
+      milestones.push({
+        year: currentYear + yearsInt,
+        age: milestoneAge,
+        label: `Obiettivo: ${cm.label}`,
+        pacT: targetVal,
+        fonteT: Math.round(fonteVal),
+        note: months > 0 
+          ? `Raggiungibile in circa ${months} mesi (~${(months/12).toFixed(1)} anni) di versamenti`
+          : 'Traguardo già raggiunto!',
+      });
+    });
+
+    // 4. Aggiungiamo il traguardo principale FIRE (età target)
     const targetYears = targetAge - currentAge;
     if (targetYears > 0) {
       const tPac = calcFV(state.etfValue, pac, rate, targetYears * 12);
@@ -1860,7 +2032,7 @@ export default function PersonalFinanceDashboard() {
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
               <StatCard label="Patrimonio Netto" value={fmt(netWorth)} sub="Net Worth Totale" accent="emerald" icon={TrendingUp} large />
               <StatCard label="ETF Scalable" value={fmt(state.etfValue)} sub="Core Portfolio" accent="blue" icon={TrendingUp} />
-              <StatCard label="Previdenza" value={fmt(state.fonteValue)} sub="Fondo Fon.Te." accent="purple" icon={PiggyBank} />
+              <StatCard label="Previdenza" value={fmt(state.fonteValue)} sub={`Fondo ${config.fonte.name || 'Pensione'}`} accent="purple" icon={PiggyBank} />
               <StatCard label="Liquidità" value={fmt(totalLiq)} sub={`${((totalLiq / (netWorth || 1)) * 100).toFixed(1)}% del totale`} accent="amber" icon={Wallet} />
               <StatCard label="PAC mensile" value={fmt(config.pac.monthlyAmount)} sub={`SDD il ${config.pac.payDay}° del mese`} accent="indigo" icon={CreditCard} />
             </div>
@@ -2501,10 +2673,32 @@ export default function PersonalFinanceDashboard() {
 
         {/* ═══════════ PORTFOLIO ═══════════ */}
         {tab === 'portfolio' && (() => {
+          if (!config.pac.instruments || config.pac.instruments.length === 0) {
+            return (
+              <div className="space-y-6">
+                <Card>
+                  <CardHeader title="Il tuo Portafoglio ETF" icon={BarChart3} accentColor="blue" />
+                  <div className="p-8 text-center max-w-lg mx-auto">
+                    <div className="w-12 h-12 bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                      <BarChart3 size={24} />
+                    </div>
+                    <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Nessun ETF configurato</h3>
+                    <p className="text-xs text-slate-500 mt-2 leading-relaxed">
+                      Il tuo portafoglio PAC è attualmente vuoto. Per tracciare i tuoi investimenti, calcolare il drift di allocazione e monitorare l'andamento di mercato, configura i tuoi ETF nelle Impostazioni.
+                    </p>
+                    <Button variant="primary" className="mt-5" onClick={() => setTab('settings')}>
+                      Configura PAC & Strumenti
+                    </Button>
+                  </div>
+                </Card>
+              </div>
+            );
+          }
+
           // Per-instrument tracking with drift detection
           const instrumentValues = state.instrumentValues || {};
           const filledInstruments = config.pac.instruments.filter(ins => safeNum(instrumentValues[ins.id]) > 0);
-          const allInstrumentsFilled = filledInstruments.length === config.pac.instruments.length;
+          const allInstrumentsFilled = config.pac.instruments.length > 0 && filledInstruments.length === config.pac.instruments.length;
           const partialTracking = filledInstruments.length > 0 && !allInstrumentsFilled;
           const instrumentTotal = config.pac.instruments.reduce((s, ins) => s + safeNum(instrumentValues[ins.id]), 0);
           const hasPerInstrument = allInstrumentsFilled;
@@ -2543,7 +2737,7 @@ export default function PersonalFinanceDashboard() {
                     </div>
                     <div>
                       <div className="flex items-center justify-between mb-1.5">
-                        <label className="text-xs text-slate-500 font-medium">Fon.Te. — posizione attuale</label>
+                        <label className="text-xs text-slate-500 font-medium">{config.fonte.name || 'Previdenza'} — posizione attuale</label>
                         {state.fonteValueUpdatedAt && (
                           <span className={`text-[10px] ${isStale(state.fonteValueUpdatedAt, 180) ? 'text-amber-600 font-medium' : 'text-slate-400'}`}>
                             {isStale(state.fonteValueUpdatedAt, 180) && '⚠ '}aggiornato {formatRelativeTime(state.fonteValueUpdatedAt)}
@@ -2670,13 +2864,13 @@ export default function PersonalFinanceDashboard() {
               </Card>
 
               <Card>
-                <CardHeader title="Fon.Te. Previdenza Complementare" subtitle={`${fmt(state.fonteValue)} · Comparto ${config.fonte.comparto}`} icon={PiggyBank} accentColor="purple" />
+                <CardHeader title={`${config.fonte.name || 'Fondo Pensione'} Previdenza Complementare`} subtitle={`${fmt(state.fonteValue)} · Comparto ${config.fonte.comparto}`} icon={PiggyBank} accentColor="purple" />
                 <div className="px-5 pb-5">
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
                     {[
                       { k: 'Comparto', v: config.fonte.comparto },
                       { k: 'TER', v: `${config.fonte.ter}%` },
-                      { k: 'Asset allocation', v: '60% Az. / 40% Obbl.' },
+                      { k: 'Asset allocation', v: config.fonte.allocation || 'Personalizzato' },
                       { k: 'Contributo/mese', v: `~${fmt(config.fonte.monthlyContribution)}` },
                     ].map(it => (
                       <div key={it.k} className="bg-purple-50 rounded-lg p-3">
@@ -2688,18 +2882,18 @@ export default function PersonalFinanceDashboard() {
                   <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 flex items-start gap-2">
                     <Info size={14} className="text-blue-600 flex-shrink-0 mt-0.5" />
                     <div className="text-xs text-blue-900">
-                      <strong>Leva fiscale:</strong> Deducibilità contributi volontari Rigo E27 · Aliquota agevolata 15% → 9% in erogazione · Contributo datoriale aggiuntivo attivo · Delta comparto stimato a 20 anni: <strong>+€51.000</strong>
+                      <strong>Leva fiscale:</strong> Deducibilità contributi volontari Rigo E27 · Aliquota agevolata 15% → 9% in erogazione · Contributo datoriale aggiuntivo attivo.
                     </div>
                   </div>
                 </div>
               </Card>
 
               <Card>
-                <CardHeader title="Deducibilità Fiscale Fon.Te. — Rigo E27" subtitle="Calcolo automatico degli scaglioni e del risparmio d'imposta" icon={Receipt} accentColor="emerald"
+                <CardHeader title={`Deducibilità Fiscale ${config.fonte.name || 'Fondo'} — Rigo E27`} subtitle="Calcolo automatico degli scaglioni e del risparmio d'imposta" icon={Receipt} accentColor="emerald"
                   action={
                     <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
                       <Button size="sm" icon={Upload} onClick={() => fonteFileInputRef.current?.click()}>
-                        Importa Excel Fon.Te.
+                        Importa Excel {config.fonte.name || 'Fondo'}
                       </Button>
                       <Button size="sm" icon={Plus} variant="primary" onClick={() => {
                         setNewContrib({ year: cy, quarter: 1, aderente: '', azienda: '', tfr: '', volontario: '', welfare: '' });
@@ -2777,7 +2971,7 @@ export default function PersonalFinanceDashboard() {
                   </div>
 
                   {/* Contributions Table */}
-                  <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-2.5">Storico Versamenti Fon.Te.</h4>
+                  <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-2.5">Storico Versamenti {config.fonte.name || 'Fondo'}</h4>
                   <div className="overflow-x-auto border border-slate-200 rounded-xl">
                     <table className="w-full text-xs text-left" style={{ minWidth: 600 }}>
                       <thead className="bg-slate-50 text-slate-500 uppercase font-semibold text-[10px] border-b border-slate-200">
@@ -2930,12 +3124,12 @@ export default function PersonalFinanceDashboard() {
             )}
 
             <Card>
-              <CardHeader title="Scenari FIRE interattivi" subtitle={`PAC ${fmt(config.pac.monthlyAmount)}/mese · Fon.Te. ${fmt(config.fonte.monthlyContribution)}/mese`} icon={Flame} accentColor="orange" />
+              <CardHeader title="Scenari FIRE interattivi" subtitle={`PAC ${fmt(config.pac.monthlyAmount)}/mese · ${config.fonte.name || 'Previdenza'} ${fmt(config.fonte.monthlyContribution)}/mese`} icon={Flame} accentColor="orange" />
               <div className="px-5 pb-5">
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-5">
                   {[
                     { key: 'rate', label: 'Rendimento PAC reale', min: 1, max: 10, step: 0.5, unit: '%' },
-                    { key: 'fonteRate', label: 'Rendimento Fon.Te. reale', min: 1, max: 7, step: 0.5, unit: '%' },
+                    { key: 'fonteRate', label: `Rendimento ${config.fonte.name || 'Previdenza'} reale`, min: 1, max: 7, step: 0.5, unit: '%' },
                     { key: 'retireAge', label: 'Età ritiro target', min: 45, max: 60, step: 1, unit: ' a' },
                   ].map(sl => (
                     <div key={sl.key}>
@@ -3024,7 +3218,7 @@ export default function PersonalFinanceDashboard() {
                               </div>
                               <div className="text-right flex-shrink-0">
                                 <p className="text-sm font-semibold text-slate-900 tabular-nums">{fmtK(ms.pacT)}</p>
-                                <p className="text-[10px] text-slate-500">+ Fon.Te. {fmtK(ms.fonteT)}</p>
+                                <p className="text-[10px] text-slate-500">+ {config.fonte.name || 'Previdenza'} {fmtK(ms.fonteT)}</p>
                               </div>
                             </div>
                             <div className="mt-2">
@@ -3308,7 +3502,7 @@ export default function PersonalFinanceDashboard() {
                         <tr className="border-b border-slate-200">
                           <th className="text-left py-2.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Data</th>
                           <th className="text-right py-2.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">ETF</th>
-                          <th className="text-right py-2.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Fon.Te.</th>
+                          <th className="text-right py-2.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">{config.fonte.name || 'Previdenza'}</th>
                           <th className="text-right py-2.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Liquidità</th>
                           <th className="text-right py-2.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Netto</th>
                         </tr>
@@ -3499,7 +3693,7 @@ export default function PersonalFinanceDashboard() {
                         let label = "";
                         let desc = "";
                         if (item.name === 'ETF') { label = 'ETF (Azionario)'; desc = 'Motore di crescita'; }
-                        if (item.name === 'Fon.Te.') { label = 'Previdenza'; desc = 'Ottimizzazione fiscale'; }
+                        if (item.name !== 'ETF' && item.name !== 'Liquidità') { label = 'Previdenza'; desc = 'Ottimizzazione fiscale'; }
                         if (item.name === 'Liquidità') { label = 'Liquidità'; desc = 'Sicurezza e operatività'; }
                         return (
                           <div key={item.name} className="bg-white rounded-xl border border-slate-200 p-4">
@@ -3540,7 +3734,7 @@ export default function PersonalFinanceDashboard() {
                               <Tooltip formatter={v => fmt(v)} contentStyle={{ fontSize: 12, borderRadius: 8 }} />
                               <Legend wrapperStyle={{ fontSize: 12, paddingTop: 5 }} />
                               <Area type="monotone" dataKey="ETF" stackId="1" stroke="#3b82f6" fill="#3b82f6" fillOpacity={0.6} />
-                              <Area type="monotone" dataKey="Fon.Te." stackId="1" stroke="#8b5cf6" fill="#8b5cf6" fillOpacity={0.6} />
+                              <Area type="monotone" dataKey={config.fonte.name || 'Previdenza'} stackId="1" stroke="#8b5cf6" fill="#8b5cf6" fillOpacity={0.6} />
                               <Area type="monotone" dataKey="Liquidità" stackId="1" stroke="#f59e0b" fill="#f59e0b" fillOpacity={0.6} />
                             </AreaChart>
                           </ResponsiveContainer>
@@ -3792,33 +3986,73 @@ export default function PersonalFinanceDashboard() {
               <CardHeader title="Spese fisse mensili"
                 subtitle={totalFixedExpenses > 0 ? `Totale ${fmt(totalFixedExpenses)}/mese · Margine reale ${fmt(realMargin)}` : 'Configura le tue uscite ricorrenti'}
                 icon={Home} accentColor="rose" />
-              <div className="px-5 pb-5 space-y-3">
-                {Object.entries(config.expenses || {}).map(([key, exp]: [string, any]) => {
-                  const Icon = EXPENSE_ICONS[exp.icon] || Home;
-                  return (
-                    <div key={key} className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-lg bg-slate-100 text-slate-600 flex items-center justify-center flex-shrink-0">
-                        <Icon size={15} />
+              <div className="px-5 pb-5 space-y-4">
+                <div className="space-y-3">
+                  {Object.entries(config.expenses || {}).map(([key, exp]: [string, any]) => {
+                    return (
+                      <div key={key} className="flex items-center gap-2 bg-slate-50/50 p-2 rounded-xl border border-slate-100">
+                        {/* Selettore Icona */}
+                        <select value={exp.icon || 'home'}
+                          onChange={e => updateConfig({
+                            expenses: {
+                              ...config.expenses,
+                              [key]: { ...exp, icon: e.target.value }
+                            }
+                          })}
+                          className="w-9 h-9 border border-slate-200 rounded-lg text-sm bg-white flex items-center justify-center text-center focus:outline-none focus:ring-1 focus:ring-emerald-300">
+                          <option value="home">🏠</option>
+                          <option value="zap">⚡</option>
+                          <option value="tv">📺</option>
+                          <option value="shield">🛡️</option>
+                          <option value="phone">📞</option>
+                          <option value="istruzione">🎓</option>
+                        </select>
+
+                        {/* Modifica Label */}
+                        <input type="text" value={exp.label}
+                          onChange={e => updateConfig({
+                            expenses: {
+                              ...config.expenses,
+                              [key]: { ...exp, label: e.target.value }
+                            }
+                          })}
+                          placeholder="es. Affitto"
+                          className="flex-1 px-2.5 py-1.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-rose-300 focus:border-rose-300 min-w-0" />
+
+                        {/* Modifica Importo */}
+                        <MoneyInput
+                          size="sm"
+                          className="w-28"
+                          value={exp.amount || ''}
+                          onChange={v => updateConfig({
+                            expenses: {
+                              ...config.expenses,
+                              [key]: { ...exp, amount: safeNum(v) }
+                            }
+                          })}
+                        />
+
+                        {/* Elimina Spesa */}
+                        <button onClick={() => deleteFixedExpense(key)} className="text-slate-400 hover:text-rose-600 transition-colors p-1.5 flex-shrink-0" title="Rimuovi spesa fissa">
+                          <Trash2 size={14} />
+                        </button>
                       </div>
-                      <span className="text-sm text-slate-700 flex-1">{exp.label}</span>
-                      <MoneyInput
-                        size="sm"
-                        className="w-32"
-                        value={exp.amount || ''}
-                        onChange={v => updateConfig({
-                          expenses: {
-                            ...config.expenses,
-                            [key]: { ...exp, amount: safeNum(v) }
-                          }
-                        })}
-                      />
-                    </div>
-                  );
-                })}
-                <div className="flex justify-between items-center pt-2 border-t border-slate-100 text-xs">
-                  <span className="text-slate-500">Totale spese fisse</span>
-                  <span className="font-semibold tabular-nums text-rose-700">{fmt(totalFixedExpenses)}/mese</span>
+                    );
+                  })}
+                  
+                  {Object.keys(config.expenses || {}).length === 0 && (
+                    <p className="text-xs text-slate-400 italic text-center py-2">Nessuna spesa fissa configurata.</p>
+                  )}
                 </div>
+
+                <div className="flex justify-between items-center pt-2 border-t border-slate-100">
+                  <Button size="sm" icon={Plus} onClick={addFixedExpense}>Aggiungi Spesa Fissa</Button>
+                  <div className="text-right text-xs">
+                    <span className="text-slate-500 mr-2">Totale spese fisse</span>
+                    <span className="font-semibold tabular-nums text-rose-700">{fmt(totalFixedExpenses)}/mese</span>
+                  </div>
+                </div>
+
                 {totalFixedExpenses > 0 && (
                   <div className={`rounded-lg p-2.5 text-xs flex items-center gap-2 ${realMargin >= 0 ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'}`}>
                     {realMargin >= 0
@@ -3827,66 +4061,141 @@ export default function PersonalFinanceDashboard() {
                     }
                   </div>
                 )}
-                <p className="text-[11px] text-slate-400">Le spese fisse sono automaticamente dedotte dal cashflow. Non richiedono conferma mensile.</p>
+                <p className="text-[11px] text-slate-400">Le spese fisse sono automaticamente dedotte dal cashflow e non richiedono conferma mensile.</p>
               </div>
             </Card>
 
             {/* 4. Spese Variabili */}
             <Card>
-              <CardHeader title="Spese Variabili Stimate" subtitle="Budget mensile stimato per evitare sovrastime della liquidità cashflow" icon={Receipt} accentColor="rose" />
-              <div className="px-5 pb-5 grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div>
-                  <label className="text-xs text-slate-500 font-medium block mb-1.5">Spesa e Alimentari (€/mese)</label>
-                  <MoneyInput value={config.variableExpenses?.spesa?.amount ?? 150} onChange={v => updateConfig({
-                    variableExpenses: {
-                      ...config.variableExpenses,
-                      spesa: { ...config.variableExpenses?.spesa, amount: safeNum(v) }
-                    }
-                  })} />
+              <CardHeader title="Spese Variabili Stimate" subtitle="Budget mensili stimati per evitare sovrastime della liquidità cashflow" icon={Receipt} accentColor="rose" />
+              <div className="px-5 pb-5 space-y-4">
+                <div className="space-y-3">
+                  {Object.entries(config.variableExpenses || {}).map(([key, exp]: [string, any]) => {
+                    return (
+                      <div key={key} className="flex items-center gap-2 bg-slate-50/50 p-2 rounded-xl border border-slate-100">
+                        {/* Modifica Label */}
+                        <input type="text" value={exp.label}
+                          onChange={e => updateConfig({
+                            variableExpenses: {
+                              ...config.variableExpenses,
+                              [key]: { ...exp, label: e.target.value }
+                            }
+                          })}
+                          placeholder="es. Spesa e Alimentari"
+                          className="flex-1 px-2.5 py-1.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-rose-300 focus:border-rose-300 min-w-0" />
+
+                        {/* Modifica Importo */}
+                        <MoneyInput
+                          size="sm"
+                          className="w-28"
+                          value={exp.amount || ''}
+                          onChange={v => updateConfig({
+                            variableExpenses: {
+                              ...config.variableExpenses,
+                              [key]: { ...exp, amount: safeNum(v) }
+                            }
+                          })}
+                        />
+
+                        {/* Elimina Spesa */}
+                        <button onClick={() => deleteVariableExpense(key)} className="text-slate-400 hover:text-rose-600 transition-colors p-1.5 flex-shrink-0" title="Rimuovi spesa variabile">
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    );
+                  })}
+
+                  {Object.keys(config.variableExpenses || {}).length === 0 && (
+                    <p className="text-xs text-slate-400 italic text-center py-2">Nessun budget per spese variabili configurato.</p>
+                  )}
                 </div>
-                <div>
-                  <label className="text-xs text-slate-500 font-medium block mb-1.5">Benzina e Trasporti (€/mese)</label>
-                  <MoneyInput value={config.variableExpenses?.trasporti?.amount ?? 100} onChange={v => updateConfig({
-                    variableExpenses: {
-                      ...config.variableExpenses,
-                      trasporti: { ...config.variableExpenses?.trasporti, amount: safeNum(v) }
-                    }
-                  })} />
-                </div>
-                <div>
-                  <label className="text-xs text-slate-500 font-medium block mb-1.5">Svago ed Extra (€/mese)</label>
-                  <MoneyInput value={config.variableExpenses?.extra?.amount ?? 100} onChange={v => updateConfig({
-                    variableExpenses: {
-                      ...config.variableExpenses,
-                      extra: { ...config.variableExpenses?.extra, amount: safeNum(v) }
-                    }
-                  })} />
+
+                <div className="flex justify-between items-center pt-2 border-t border-slate-100">
+                  <Button size="sm" icon={Plus} onClick={addVariableExpense}>Aggiungi Spesa Variabile</Button>
+                  <div className="text-right text-xs">
+                    <span className="text-slate-500 mr-2">Totale stima spese variabili</span>
+                    <span className="font-semibold tabular-nums text-rose-700">{fmt(totalVariableExpenses)}/mese</span>
+                  </div>
                 </div>
               </div>
             </Card>
 
             {/* 5. Sistema a cascata */}
             <Card>
-              <CardHeader title="Cap sistema a cascata" icon={Wallet} accentColor="amber" />
-              <div className="px-5 pb-5 space-y-2">
-                {config.waterfallLevels.map((lv, idx) => (
-                  <div key={lv.id} className="flex items-center gap-2">
-                    <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: lv.color }} />
-                    <input type="text" value={lv.name}
-                      onChange={e => {
-                        const newLv = [...config.waterfallLevels];
-                        newLv[idx] = { ...newLv[idx], name: e.target.value };
-                        updateConfig({ waterfallLevels: newLv });
-                      }}
-                      className="flex-1 px-2.5 py-1.5 text-sm border border-slate-200 rounded-lg bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-300" />
-                    <MoneyInput value={lv.cap} className="w-32" onChange={v => {
-                      const newLv = [...config.waterfallLevels];
-                      newLv[idx] = { ...newLv[idx], cap: safeNum(v) };
-                      updateConfig({ waterfallLevels: newLv });
-                    }} />
-                  </div>
-                ))}
-                <p className="text-[11px] text-slate-500 pt-1">Cap = 0 significa nessun limite (livello overflow).</p>
+              <CardHeader title="Cap sistema a cascata (Waterfall)" subtitle="Definisci i livelli di riempimento progressivo della liquidità" icon={Wallet} accentColor="amber" />
+              <div className="px-5 pb-5 space-y-4">
+                <div className="space-y-4">
+                  {config.waterfallLevels.map((lv, idx) => {
+                    const isLast = idx === config.waterfallLevels.length - 1;
+                    return (
+                      <div key={lv.id} className="space-y-2 bg-slate-50/50 p-2.5 rounded-xl border border-slate-100">
+                        <div className="flex items-center gap-2">
+                          <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: lv.color }} />
+                          <input type="text" value={lv.name}
+                            onChange={e => {
+                              const newLv = [...config.waterfallLevels];
+                              newLv[idx] = { ...newLv[idx], name: e.target.value };
+                              updateConfig({ waterfallLevels: newLv });
+                            }}
+                            placeholder="Nome del buffer"
+                            className="flex-1 px-2.5 py-1.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-300" />
+                          
+                          {/* Cap Input o Badge Overflow per l'ultimo livello */}
+                          {isLast ? (
+                            <span className="w-32 text-center text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-amber-100 text-amber-800 border border-amber-200">
+                              Overflow (Illimitato)
+                            </span>
+                          ) : (
+                            <MoneyInput value={lv.cap} className="w-32" onChange={v => {
+                              const newLv = [...config.waterfallLevels];
+                              newLv[idx] = { ...newLv[idx], cap: safeNum(v) };
+                              updateConfig({ waterfallLevels: newLv });
+                            }} />
+                          )}
+
+                          {/* Pulsante Rimuovi Buffer */}
+                          {config.waterfallLevels.length > 1 && (
+                            <button onClick={() => deleteWaterfallLevel(lv.id)} className="text-slate-400 hover:text-rose-600 transition-colors p-1.5 flex-shrink-0" title="Rimuovi buffer">
+                              <Trash2 size={14} />
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Rigo opzioni pl-4: Descrizione ed Icona */}
+                        <div className="flex items-center gap-2 pl-4">
+                          <span className="text-[11px] text-slate-400 w-12 flex-shrink-0">Descrizione:</span>
+                          <input type="text" value={lv.desc || ''}
+                            placeholder="es. Spese straordinarie e imprevisti"
+                            onChange={e => {
+                              const newLv = [...config.waterfallLevels];
+                              newLv[idx] = { ...newLv[idx], desc: e.target.value };
+                              updateConfig({ waterfallLevels: newLv });
+                            }}
+                            className="flex-1 px-2.5 py-1 text-xs border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-200" />
+                          
+                          <span className="text-[11px] text-slate-400 w-10 flex-shrink-0 text-right">Icona:</span>
+                          <select value={lv.icon || 'coffee'}
+                            onChange={e => {
+                              const newLv = [...config.waterfallLevels];
+                              newLv[idx] = { ...newLv[idx], icon: e.target.value };
+                              updateConfig({ waterfallLevels: newLv });
+                            }}
+                            className="px-2 py-0.5 border border-slate-200 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-emerald-300">
+                            <option value="shield">🛡️ Scudo</option>
+                            <option value="coffee">☕ Svago</option>
+                            <option value="zap">⚡ Operatività</option>
+                            <option value="rocket">🚀 Investimenti</option>
+                          </select>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="flex justify-start pt-2 border-t border-slate-100">
+                  <Button size="sm" icon={Plus} onClick={addWaterfallLevel}>Aggiungi Buffer Liquidità</Button>
+                </div>
+                <p className="text-[11px] text-slate-400">La liquidità inserita riempirà i buffer in ordine sequenziale fino al cap impostato. Eventuali eccedenze confluiranno automaticamente nell'ultimo livello (Overflow).</p>
               </div>
             </Card>
 
@@ -3927,9 +4236,9 @@ export default function PersonalFinanceDashboard() {
                 </div>
                 <div>
                   <p className="text-xs text-slate-500 font-medium mb-2">Allocazione strumenti (somma deve = 100%)</p>
-                  <div className="space-y-3">
+                  <div className="space-y-4">
                     {config.pac.instruments.map((ins, idx) => (
-                      <div key={ins.id} className="space-y-1.5">
+                      <div key={ins.id} className="space-y-1.5 bg-slate-50/50 p-2.5 rounded-xl border border-slate-100">
                         <div className="flex items-center gap-2">
                           <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: ins.color }} />
                           <input type="text" value={ins.name}
@@ -3938,62 +4247,95 @@ export default function PersonalFinanceDashboard() {
                               newIns[idx] = { ...newIns[idx], name: e.target.value };
                               updateConfig({ pac: { ...config.pac, instruments: newIns } });
                             }}
-                            className="flex-1 px-2.5 py-1.5 text-sm border border-slate-200 rounded-lg bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-300" />
+                            className="flex-1 px-2.5 py-1.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-300" />
                           <NumberInput className="w-24" value={ins.pct} onChange={v => {
                             const newIns = [...config.pac.instruments];
                             newIns[idx] = { ...newIns[idx], pct: Math.max(0, v) };
                             updateConfig({ pac: { ...config.pac, instruments: newIns } });
                           }} suffix="%" step={0.5} />
+                          <button onClick={() => deleteInstrument(ins.id)} className="text-slate-400 hover:text-rose-600 transition-colors p-1.5 flex-shrink-0" title="Rimuovi strumento">
+                            <Trash2 size={14} />
+                          </button>
                         </div>
-                        <div className="flex items-center gap-2 pl-4">
+                        <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap pl-4">
                           <span className="text-[11px] text-slate-400 w-12 flex-shrink-0">Ticker:</span>
                           <input type="text" value={ins.ticker || ''}
-                            placeholder="es. VUSA.LON"
+                            placeholder="es. SWDA.MI"
                             onChange={e => {
                               const newIns = [...config.pac.instruments];
                               newIns[idx] = { ...newIns[idx], ticker: e.target.value.toUpperCase() };
                               updateConfig({ pac: { ...config.pac, instruments: newIns } });
                             }}
-                            className="flex-1 px-2.5 py-1 text-xs font-mono border border-slate-200 rounded-lg bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-300 focus:border-blue-300" />
+                            className="flex-1 min-w-[80px] px-2.5 py-1 text-xs font-mono border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-300 focus:border-blue-300" />
+                          
                           <span className="text-[11px] text-slate-400 w-10 flex-shrink-0 text-right">ISIN:</span>
                           <input type="text" value={ins.isin || ''}
-                            placeholder="es. IE00B3XXRP09"
+                            placeholder="es. IE00B4L60045"
                             onChange={e => {
                               const newIns = [...config.pac.instruments];
                               newIns[idx] = { ...newIns[idx], isin: e.target.value.toUpperCase() };
                               updateConfig({ pac: { ...config.pac, instruments: newIns } });
                             }}
-                            className="flex-1 px-2.5 py-1 text-xs font-mono border border-slate-200 rounded-lg bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-300" />
+                            className="flex-1 min-w-[90px] px-2.5 py-1 text-xs font-mono border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-300" />
+                          
+                          <span className="text-[11px] text-slate-400 w-10 flex-shrink-0 text-right">TER:</span>
+                          <NumberInput className="w-20" value={ins.ter} onChange={v => {
+                            const newIns = [...config.pac.instruments];
+                            newIns[idx] = { ...newIns[idx], ter: Math.max(0, v) };
+                            updateConfig({ pac: { ...config.pac, instruments: newIns } });
+                          }} suffix="%" step={0.01} />
                         </div>
                       </div>
                     ))}
-                    <div className="flex justify-between text-xs pt-1 px-2">
-                      <span className="text-slate-500">Totale allocazione</span>
-                      <span className={`font-semibold tabular-nums ${Math.abs(config.pac.instruments.reduce((s, i) => s + i.pct, 0) - 100) < 0.01 ? 'text-emerald-700' : 'text-rose-700'}`}>
-                        {config.pac.instruments.reduce((s, i) => s + i.pct, 0).toFixed(1)}%
-                      </span>
+                    
+                    {config.pac.instruments.length === 0 && (
+                      <p className="text-xs text-slate-400 italic text-center py-3">Nessun ETF aggiunto. Clicca su Aggiungi Strumento per iniziare.</p>
+                    )}
+
+                    <div className="flex justify-between items-center pt-2 border-t border-slate-100">
+                      <Button size="sm" icon={Plus} onClick={addInstrument}>Aggiungi Strumento</Button>
+                      <div className="text-right text-xs">
+                        <span className="text-slate-500 mr-2">Totale allocazione</span>
+                        <span className={`font-semibold tabular-nums ${Math.abs(config.pac.instruments.reduce((s, i) => s + i.pct, 0) - 100) < 0.01 ? 'text-emerald-700' : 'text-rose-700'}`}>
+                          {config.pac.instruments.reduce((s, i) => s + i.pct, 0).toFixed(1)}%
+                        </span>
+                      </div>
                     </div>
                   </div>
                 </div>
               </div>
             </Card>
 
-            {/* 8. Previdenza Complementare (Fon.Te.) */}
+            {/* 8. Previdenza Complementare */}
             <Card>
-              <CardHeader title="Fon.Te." subtitle="Previdenza complementare" icon={PiggyBank} accentColor="purple" />
-              <div className="px-5 pb-5 grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div>
-                  <label className="text-xs text-slate-500 font-medium block mb-1.5">Contributo/mese</label>
-                  <MoneyInput value={config.fonte.monthlyContribution} onChange={v => updateConfig({ fonte: { ...config.fonte, monthlyContribution: safeNum(v) } })} />
+              <CardHeader title={config.fonte.name || 'Fondo Pensione'} subtitle="Previdenza complementare" icon={PiggyBank} accentColor="purple" />
+              <div className="px-5 pb-5 space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pb-4 border-b border-slate-100">
+                  <div>
+                    <label className="text-xs text-slate-500 font-medium block mb-1.5">Nome del Fondo</label>
+                    <input type="text" value={config.fonte.name} onChange={e => updateConfig({ fonte: { ...config.fonte, name: e.target.value } })}
+                      className="w-full px-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-500 font-medium block mb-1.5">Asset Allocation (descrizione)</label>
+                    <input type="text" value={config.fonte.allocation} onChange={e => updateConfig({ fonte: { ...config.fonte, allocation: e.target.value } })}
+                      className="w-full px-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white" />
+                  </div>
                 </div>
-                <div>
-                  <label className="text-xs text-slate-500 font-medium block mb-1.5">TER (%)</label>
-                  <NumberInput value={config.fonte.ter} onChange={v => updateConfig({ fonte: { ...config.fonte, ter: v } })} suffix="%" step={0.01} />
-                </div>
-                <div>
-                  <label className="text-xs text-slate-500 font-medium block mb-1.5">Comparto</label>
-                  <input type="text" value={config.fonte.comparto} onChange={e => updateConfig({ fonte: { ...config.fonte, comparto: e.target.value } })}
-                    className="w-full px-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white" />
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div>
+                    <label className="text-xs text-slate-500 font-medium block mb-1.5">Contributo/mese</label>
+                    <MoneyInput value={config.fonte.monthlyContribution} onChange={v => updateConfig({ fonte: { ...config.fonte, monthlyContribution: safeNum(v) } })} />
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-500 font-medium block mb-1.5">TER (%)</label>
+                    <NumberInput value={config.fonte.ter} onChange={v => updateConfig({ fonte: { ...config.fonte, ter: v } })} suffix="%" step={0.01} />
+                  </div>
+                  <div>
+                    <label className="text-xs text-slate-500 font-medium block mb-1.5">Comparto</label>
+                    <input type="text" value={config.fonte.comparto} onChange={e => updateConfig({ fonte: { ...config.fonte, comparto: e.target.value } })}
+                      className="w-full px-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white" />
+                  </div>
                 </div>
               </div>
             </Card>
@@ -4013,6 +4355,45 @@ export default function PersonalFinanceDashboard() {
                 <div>
                   <label className="text-xs text-slate-500 font-medium block mb-1.5">Rendita mensile target (€)</label>
                   <MoneyInput value={config.monthlyDesiredIncome} onChange={v => updateConfig({ monthlyDesiredIncome: safeNum(v) })} />
+                </div>
+              </div>
+            </Card>
+
+            {/* Milestone Personalizzate */}
+            <Card>
+              <CardHeader title="Milestone Personalizzate" subtitle="Aggiungi o rimuovi traguardi di capitale personalizzati" icon={Flag} accentColor="orange" />
+              <div className="px-5 pb-5 space-y-4">
+                <div className="space-y-2">
+                  {(config.customMilestones || []).map((m: any) => (
+                    <div key={m.id} className="flex items-center justify-between gap-3 bg-slate-50/50 p-2 rounded-xl border border-slate-100">
+                      <span className="text-sm font-medium text-slate-700">{m.label}</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-semibold tabular-nums text-slate-900">{fmt(m.targetAmount)}</span>
+                        <button onClick={() => deleteCustomMilestone(m.id)} className="text-slate-400 hover:text-rose-600 transition-colors p-1.5 flex-shrink-0" title="Rimuovi milestone">
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  {(config.customMilestones || []).length === 0 && (
+                    <p className="text-xs text-slate-400 italic text-center py-2">Nessuna milestone personalizzata configurata.</p>
+                  )}
+                </div>
+
+                <div className="flex gap-2 items-end pt-3 border-t border-slate-100 flex-wrap sm:flex-nowrap">
+                  <div className="flex-1 min-w-[150px]">
+                    <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 block mb-1">Nome traguardo</label>
+                    <input type="text" value={newMsLabel} onChange={e => setNewMsLabel(e.target.value)}
+                      placeholder="es. Acquisto Casa, Auto..."
+                      className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white" />
+                  </div>
+                  <div className="w-36">
+                    <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 block mb-1">Capitale Target</label>
+                    <MoneyInput size="sm" value={newMsAmount} onChange={setNewMsAmount} placeholder="es. 50000" />
+                  </div>
+                  <Button size="sm" variant="primary" icon={Plus} onClick={addCustomMilestone} disabled={!newMsLabel.trim() || !newMsAmount}>
+                    Aggiungi
+                  </Button>
                 </div>
               </div>
             </Card>
@@ -4823,7 +5204,7 @@ export default function PersonalFinanceDashboard() {
                             <td className="text-right tabular-nums">{((state.etfValue / (netWorth || 1)) * 100).toFixed(1)}%</td>
                           </tr>
                           <tr>
-                            <td className="font-semibold">Fondo Previdenziale Fon.Te.</td>
+                            <td className="font-semibold">Fondo Previdenziale {config.fonte.name || 'Pensione'}</td>
                             <td className="text-right tabular-nums">{fmt(state.fonteValue)}</td>
                             <td className="text-right tabular-nums">{((state.fonteValue / (netWorth || 1)) * 100).toFixed(1)}%</td>
                           </tr>
@@ -4853,7 +5234,7 @@ export default function PersonalFinanceDashboard() {
                         <div className="flex justify-between items-center text-[8.5px] text-slate-500 mt-2">
                           <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-400" /> Liquidità: <strong>{liqPct.toFixed(1)}%</strong></span>
                           <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-600" /> Portafoglio PAC: <strong>{etfPct.toFixed(1)}%</strong></span>
-                          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-purple-600" /> Fondo Fon.Te.: <strong>{fontePct.toFixed(1)}%</strong></span>
+                          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-purple-600" /> {config.fonte.name || 'Fondo Pensione'}: <strong>{fontePct.toFixed(1)}%</strong></span>
                         </div>
                       </div>
                     );
@@ -4994,14 +5375,14 @@ export default function PersonalFinanceDashboard() {
                 {/* SEZIONE 4: PIANO PREVIDENZIALE FON.TE */}
                 <div>
                   <h3 className="pdf-serif text-sm font-black text-[#0f1923] uppercase tracking-wider mb-3 pb-1 border-b border-slate-100">
-                    SEZIONE 4 — PIANO PREVIDENZIALE FON.TE
+                    SEZIONE 4 — PIANO PREVIDENZIALE {(config.fonte.name || 'Pensione').toUpperCase()}
                   </h3>
                   
                   <div className="grid grid-cols-3 gap-4">
                     <div className="bg-slate-50 border border-slate-100 rounded-xl p-3 text-xs space-y-2">
                       <div className="border-b border-slate-200/60 pb-1.5">
                         <span className="text-[7.5px] text-slate-400 font-bold uppercase block">Fondo Pensione</span>
-                        <strong className="text-slate-800">Fondo Fon.Te. (Negoziale)</strong>
+                        <strong className="text-slate-800">Fondo {config.fonte.name || 'Pensione'} ({config.fonte.allocation || 'Personalizzato'})</strong>
                       </div>
                       <div className="border-b border-slate-200/60 pb-1.5">
                         <span className="text-[7.5px] text-slate-400 font-bold uppercase block">Comparto Attivo</span>
@@ -5264,7 +5645,7 @@ export default function PersonalFinanceDashboard() {
                       <div className="flex items-start gap-2 border-t border-slate-200/60 pt-2">
                         <span className="text-emerald-600 font-bold block min-w-[130px]">Crescita Annuale (CAGR):</span>
                         <span className="text-slate-600 leading-normal text-[8.5px]">
-                          Rappresenta la crescita geometrica annualizzata del patrimonio complessivo al netto dei flussi in ingresso. Valuta l'effettivo "motore dell'interesse composto" e l'efficienza allocativa tra ETF e fondo previdenziale Fon.Te.
+                          Rappresenta la crescita geometrica annualizzata del patrimonio complessivo al netto dei flussi in ingresso. Valuta l'effettivo "motore dell'interesse composto" e l'efficienza allocativa tra ETF e il fondo previdenziale {config.fonte.name || 'Pensione'}.
                         </span>
                       </div>
 
