@@ -60,7 +60,7 @@ async function fetchQuote(ticker: string): Promise<Quote> {
 function Sparkline({ data, isPositive }: { data?: number[]; isPositive?: boolean }) {
   if (!data || data.length < 2) {
     return (
-      <div className="w-24 h-6 flex items-center justify-center text-[10px] text-slate-400 font-mono tracking-wider">
+      <div className="w-full h-6 flex items-center justify-center text-[10px] text-slate-400 font-mono tracking-wider">
         ——
       </div>
     )
@@ -84,8 +84,8 @@ function Sparkline({ data, isPositive }: { data?: number[]; isPositive?: boolean
   const strokeColor = isPositive ? '#10b981' : '#f43f5e' // Emerald (verde) o Rose (rosso)
 
   return (
-    <div className="w-24 h-8 flex items-center">
-      <svg className="w-full h-full overflow-visible" viewBox={`0 0 ${width} ${height}`}>
+    <div className="w-full h-8 flex items-center">
+      <svg className="w-full h-full overflow-visible" viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
         <polyline
           fill="none"
           stroke={strokeColor}
@@ -209,7 +209,7 @@ export default function MarketTab({ config }: Props) {
       </div>
 
       {/* ─── 1. GRIGLIA INDICI GLOBALI & ASSET ─── */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-7 gap-4">
         {GLOBAL_MARKETS.map((market) => {
           const q = globalQuotes[market.id]
           const err = globalErrors[market.id]
@@ -217,7 +217,7 @@ export default function MarketTab({ config }: Props) {
 
           return (
             <div key={market.id} className="bg-white rounded-xl border border-slate-200 p-4 flex flex-col justify-between shadow-sm min-w-0 transition-transform duration-200 hover:-translate-y-0.5">
-              {/* Sezione Superiore: Icona, Nome ed Exchange Ticker */}
+              {/* Riga 1: Icona, Nome ed Exchange Ticker */}
               <div className="min-w-0">
                 <div className="flex items-center gap-1.5">
                   <span className="text-sm flex-shrink-0">{market.icon}</span>
@@ -226,32 +226,35 @@ export default function MarketTab({ config }: Props) {
                 <span className="text-[9px] text-slate-400 font-mono tracking-wider block mt-0.5">{market.ticker}</span>
               </div>
 
-              {/* Sezione Inferiore: Prezzo + Badge Variazione (stacked) e Sparkline */}
-              <div className="mt-4 flex items-end justify-between gap-2">
-                <div className="min-w-0">
+              {/* Riga 2: Prezzo + Variazione Giornaliera (a tutta larghezza) */}
+              <div className="mt-3 flex items-baseline justify-between gap-1.5 min-w-0">
+                <div className="min-w-0 flex-1">
                   {loading && !q && !err ? (
                     <div className="h-5 w-16 bg-slate-100 rounded animate-pulse" />
                   ) : err ? (
                     <span className="text-[10px] text-slate-400 font-mono">N/D</span>
                   ) : q ? (
-                    <div className="flex flex-col">
-                      <span className="text-xs font-bold text-slate-900 tabular-nums truncate">{fmt2(q.price)}</span>
-                      <span className={`inline-flex items-center justify-center gap-0.5 text-[9px] font-bold mt-1.5 tabular-nums px-1.5 py-0.5 rounded ${isPos ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>
-                        {isPos ? '▲' : '▼'} {fmtPct(q.changePct)}
-                      </span>
-                    </div>
+                    <span className="text-sm font-bold text-slate-900 tabular-nums block truncate">
+                      {fmt2(q.price)}
+                    </span>
                   ) : (
                     <span className="text-xs text-slate-300">...</span>
                   )}
                 </div>
-                
-                {/* Sparkline dell'indice */}
-                {!err && q?.history && (
-                  <div className="flex-shrink-0">
-                    <Sparkline data={q.history} isPositive={isPos ?? true} />
-                  </div>
+
+                {q && !err && (
+                  <span className={`inline-flex items-center gap-0.5 text-[9px] font-bold tabular-nums px-1.5 py-0.5 rounded-md flex-shrink-0 ${isPos ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>
+                    {isPos ? '▲' : '▼'} {fmtPct(q.changePct)}
+                  </span>
                 )}
               </div>
+              
+              {/* Riga 3: Sparkline ad andamento orizzontale completo */}
+              {!err && q?.history && (
+                <div className="mt-3 w-full pt-1 flex-shrink-0">
+                  <Sparkline data={q.history} isPositive={isPos ?? true} />
+                </div>
+              )}
             </div>
           )
         })}
@@ -340,7 +343,9 @@ export default function MarketTab({ config }: Props) {
                       <td className="px-6 py-4">
                         <div className="flex justify-center">
                           {!err && q?.history && (
-                            <Sparkline data={q.history} isPositive={isPos ?? true} />
+                            <div className="w-24">
+                              <Sparkline data={q.history} isPositive={isPos ?? true} />
+                            </div>
                           )}
                         </div>
                       </td>
