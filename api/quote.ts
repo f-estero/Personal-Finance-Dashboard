@@ -9,8 +9,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    // Fetch da Financial Modeling Prep API
-    const url = `https://financialmodelingprep.com/api/v3/quote/${encodeURIComponent(ticker)}?apikey=${apiKey}`
+    // Fetch da Financial Modeling Prep API (base URL: https://financialmodelingprep.com/stable/)
+    const url = `https://financialmodelingprep.com/stable/quote?symbol=${encodeURIComponent(ticker)}&apikey=${apiKey}`
     const response = await fetch(url)
     const data = await response.json()
 
