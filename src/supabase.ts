@@ -10,7 +10,10 @@ if (!supabaseUrl || !supabaseAnonKey) {
   )
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey)
+const safeUrl = supabaseUrl && supabaseUrl.startsWith('http') ? supabaseUrl : 'https://dummy-url.supabase.co';
+const safeKey = supabaseAnonKey || 'dummy-key';
+
+export const supabase = createClient(safeUrl, safeKey);
 
 // ─── Storage adapter ──────────────────────────────────────────────────────────
 // Stessa interfaccia di window.storage usata nel componente originale.
