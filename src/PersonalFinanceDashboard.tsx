@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
+import * as XLSX from 'xlsx';
 import { supabase } from './supabase';
 import MarketTab from './MarketTab';
 import {
@@ -346,6 +347,7 @@ export default function PersonalFinanceDashboard() {
   const [obReturnRate, setObReturnRate] = useState('5.0');
   const [showFireWizard, setShowFireWizard] = useState(false);
   const fileInputRef = useRef(null);
+  const fonteFileInputRef = useRef<HTMLInputElement>(null);
   // Goals & Fon.Te. contributions UI
   const [showAddGoal, setShowAddGoal] = useState(false);
   const [newGoal, setNewGoal] = useState({ title: '', targetAmount: '', currentAmount: '', deadline: '', color: '#3b82f6' });
@@ -513,6 +515,114 @@ export default function PersonalFinanceDashboard() {
     const contributions = (config.fonte?.contributions || []).filter(c => c.id !== id && `${c.year}-${c.quarter}` !== id);
     updateConfig({ fonte: { ...config.fonte, contributions } });
     setToast({ message: 'Contributo rimosso', type: 'info' });
+  };
+
+  const importFonteExcel = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const data = new Uint8Array(evt.target?.result as ArrayBuffer);
+        const wb = XLSX.read(data, { type: 'array' });
+        const wsname = wb.SheetNames[0];
+        const ws = wb.Sheets[wsname];
+        const json = XLSX.utils.sheet_to_json(ws) as any[];
+
+        if (!json || json.length === 0) {
+          setToast({ message: 'Il file Excel sembra vuoto', type: 'warning' });
+          return;
+        }
+
+        // Helper to match case-insensitive and spacing-insensitive aliases
+        const getRowValue = (row: any, ...aliases: string[]): any => {
+          for (const alias of aliases) {
+            const normAlias = alias.toLowerCase().replace(/\s+/g, '').replace(/[^a-z0-9]/g, '');
+            for (const key of Object.keys(row)) {
+              const normKey = key.toLowerCase().replace(/\s+/g, '').replace(/[^a-z0-9]/g, '');
+              if (normKey === normAlias) {
+                return row[key];
+              }
+            }
+          }
+          return null;
+        };
+
+        // Helper to parse Italian or standard euro formatted string to number
+        const parseEuroValue = (val: any): number => {
+          if (val == null) return 0;
+          if (typeof val === 'number') return val;
+          let str = String(val).trim();
+          if (str.includes(',')) {
+            str = str.replace(/\./g, '').replace(',', '.');
+          }
+          const parsed = parseFloat(str);
+          return isNaN(parsed) ? 0 : parsed;
+        };
+
+        // Check if this looks like a Fon.Te. file
+        const firstRow = json[0];
+        const hasAnno = getRowValue(firstRow, 'Anno', 'anno', 'year') !== null;
+        const hasPeriodo = getRowValue(firstRow, 'Periodo', 'periodo', 'quarter') !== null;
+        
+        if (!hasAnno || !hasPeriodo) {
+          setToast({ message: 'Struttura file non riconosciuta. Assicurati che contenga le colonne "Anno" e "Periodo".', type: 'error' });
+          return;
+        }
+
+        let importCount = 0;
+        const currentContribs = [...(config.fonte?.contributions || [])];
+
+        json.forEach((row, i) => {
+          const year = parseInt(getRowValue(row, 'Anno', 'anno', 'year'));
+          const quarter = parseInt(getRowValue(row, 'Periodo', 'periodo', 'quarter'));
+          
+          if (isNaN(year) || isNaN(quarter)) return; // Skip invalid rows
+
+          const aderente = parseEuroValue(getRowValue(row, 'Aderente', 'aderente'));
+          const azienda = parseEuroValue(getRowValue(row, 'Azienda', 'azienda'));
+          
+          // Sum TFR + TFR Silente + Trasf./Reintegro
+          const tfr = parseEuroValue(getRowValue(row, 'TFR', 'tfr')) + 
+                      parseEuroValue(getRowValue(row, 'TFR Silente', 'tfrsilente')) + 
+                      parseEuroValue(getRowValue(row, 'Trasf./Reintegro', 'trasfreintegro'));
+                      
+          const volontario = parseEuroValue(getRowValue(row, 'Volontario Aderente', 'volontario', 'volontarioaderente'));
+          
+          // Sum Welfare + Premio di Produzione
+          const welfare = parseEuroValue(getRowValue(row, 'Welfare', 'welfare')) + 
+                          parseEuroValue(getRowValue(row, 'Premio di Produzione', 'premiodiproduzione'));
+                          
+          const totale = parseEuroValue(getRowValue(row, 'Totale', 'totale'));
+
+          const newC = {
+            id: 'contrib_' + year + '_' + quarter + '_' + Date.now() + '_' + i,
+            year,
+            quarter,
+            aderente,
+            azienda,
+            tfr,
+            volontario,
+            welfare,
+            totale: totale || (aderente + azienda + tfr + volontario + welfare)
+          };
+
+          // Merge or replace duplicates by year-quarter
+          const idx = currentContribs.findIndex(c => c.year === year && c.quarter === quarter);
+          if (idx > -1) {
+            currentContribs[idx] = newC;
+          } else {
+            currentContribs.push(newC);
+          }
+          importCount++;
+        });
+
+        updateConfig({ fonte: { ...config.fonte, contributions: currentContribs } });
+        setToast({ message: `Importati con successo ${importCount} contributi Fon.Te.!`, type: 'success' });
+      } catch (err) {
+        console.error(err);
+        setToast({ message: 'Errore durante la lettura del file Excel', type: 'error' });
+      }
+    };
+    reader.readAsArrayBuffer(file);
   };
 
   // ─── Auto-save (debounced) ───
@@ -2029,10 +2139,20 @@ export default function PersonalFinanceDashboard() {
               <Card>
                 <CardHeader title="Deducibilità Fiscale Fon.Te. — Rigo E27" subtitle="Calcolo automatico degli scaglioni e del risparmio d'imposta" icon={Receipt} accentColor="emerald"
                   action={
-                    <Button size="sm" icon={Plus} variant="primary" onClick={() => {
-                      setNewContrib({ year: cy, quarter: 1, aderente: '', azienda: '', tfr: '', volontario: '', welfare: '' });
-                      setShowAddContrib(true);
-                    }}>Aggiungi contributo</Button>
+                    <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+                      <Button size="sm" icon={Upload} onClick={() => fonteFileInputRef.current?.click()}>
+                        Importa Excel Fon.Te.
+                      </Button>
+                      <Button size="sm" icon={Plus} variant="primary" onClick={() => {
+                        setNewContrib({ year: cy, quarter: 1, aderente: '', azienda: '', tfr: '', volontario: '', welfare: '' });
+                        setShowAddContrib(true);
+                      }}>Aggiungi contributo</Button>
+                      <input ref={fonteFileInputRef} type="file" accept=".xlsx, .xls, .csv" onChange={e => {
+                        const file = e.target.files?.[0];
+                        if (file) importFonteExcel(file);
+                        e.target.value = ''; // Reset file input
+                      }} className="hidden" />
+                    </div>
                   } />
                 <div className="px-5 pb-5">
                   <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 mb-5">
