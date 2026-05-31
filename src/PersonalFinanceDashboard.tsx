@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { supabase } from './supabase';
+import MarketTab from './MarketTab';
 import {
   LineChart, Line, AreaChart, Area, PieChart, Pie, Cell,
   XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend, BarChart, Bar
@@ -30,9 +31,10 @@ const DEFAULT_CONFIG = {
   pac: {
     monthlyAmount: 0, payDay: 1, broker: '',
     instruments: [
-      { id: 'ins1', name: 'ETF 1', pct: 100, ter: 0.20, color: '#3b82f6' },
+      { id: 'ins1', name: 'ETF 1', pct: 100, ter: 0.20, color: '#3b82f6', ticker: '' },
     ]
   },
+  marketApiKey: '', // Alpha Vantage API key (gratuita su alphavantage.co)
   fonte: { monthlyContribution: 0, ter: 0, comparto: '' },
   expenses: {
     affitto:       { amount: 0, label: 'Affitto',       icon: 'home'    },
@@ -893,12 +895,13 @@ export default function PersonalFinanceDashboard() {
 
   // ─── Tabs ───
   const TABS = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'portfolio', label: 'Portafoglio', icon: BarChart3 },
-    { id: 'analytics', label: 'Analytics',  icon: TrendingUp },
-    { id: 'fire',      label: 'FIRE',       icon: Flame },
-    { id: 'reviews',   label: 'Revisioni',  icon: FileText },
-    { id: 'history',   label: 'Storico',    icon: HistoryIcon },
+    { id: 'dashboard', label: 'Dashboard',    icon: LayoutDashboard },
+    { id: 'portfolio', label: 'Portafoglio',  icon: BarChart3 },
+    { id: 'market',    label: 'Mercato',      icon: TrendingUp },
+    { id: 'analytics', label: 'Analytics',    icon: ArrowUpRight },
+    { id: 'fire',      label: 'FIRE',         icon: Flame },
+    { id: 'reviews',   label: 'Revisioni',    icon: FileText },
+    { id: 'history',   label: 'Storico',      icon: HistoryIcon },
     { id: 'settings',  label: 'Impostazioni', icon: SettingsIcon },
   ];
 
@@ -2068,6 +2071,9 @@ export default function PersonalFinanceDashboard() {
           );
         })()}
 
+        {/* ═══════════ MERCATO ═══════════ */}
+        {tab === 'market' && <MarketTab config={config} updateConfig={updateConfig} />}
+
         {/* ═══════════ ANALYTICS ═══════════ */}
         {tab === 'analytics' && (() => {
           const sortedSnaps = [...state.snapshots].sort((a, b) => a.date.localeCompare(b.date));
@@ -2452,22 +2458,35 @@ export default function PersonalFinanceDashboard() {
                 </div>
                 <div>
                   <p className="text-xs text-slate-500 font-medium mb-2">Allocazione strumenti (somma deve = 100%)</p>
-                  <div className="space-y-2">
+                  <div className="space-y-3">
                     {config.pac.instruments.map((ins, idx) => (
-                      <div key={ins.id} className="flex items-center gap-2">
-                        <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: ins.color }} />
-                        <input type="text" value={ins.name}
-                          onChange={e => {
+                      <div key={ins.id} className="space-y-1.5">
+                        <div className="flex items-center gap-2">
+                          <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: ins.color }} />
+                          <input type="text" value={ins.name}
+                            onChange={e => {
+                              const newIns = [...config.pac.instruments];
+                              newIns[idx] = { ...newIns[idx], name: e.target.value };
+                              updateConfig({ pac: { ...config.pac, instruments: newIns } });
+                            }}
+                            className="flex-1 px-2.5 py-1.5 text-sm border border-slate-200 rounded-lg bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-300" />
+                          <NumberInput className="w-24" value={ins.pct} onChange={v => {
                             const newIns = [...config.pac.instruments];
-                            newIns[idx] = { ...newIns[idx], name: e.target.value };
+                            newIns[idx] = { ...newIns[idx], pct: Math.max(0, v) };
                             updateConfig({ pac: { ...config.pac, instruments: newIns } });
-                          }}
-                          className="flex-1 px-2.5 py-1.5 text-sm border border-slate-200 rounded-lg bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-emerald-300" />
-                        <NumberInput className="w-24" value={ins.pct} onChange={v => {
-                          const newIns = [...config.pac.instruments];
-                          newIns[idx] = { ...newIns[idx], pct: Math.max(0, v) };
-                          updateConfig({ pac: { ...config.pac, instruments: newIns } });
-                        }} suffix="%" step={0.5} />
+                          }} suffix="%" step={0.5} />
+                        </div>
+                        <div className="flex items-center gap-2 pl-4">
+                          <span className="text-[11px] text-slate-400 w-16 flex-shrink-0">Ticker:</span>
+                          <input type="text" value={ins.ticker || ''}
+                            placeholder="es. VUSA.LON"
+                            onChange={e => {
+                              const newIns = [...config.pac.instruments];
+                              newIns[idx] = { ...newIns[idx], ticker: e.target.value.toUpperCase() };
+                              updateConfig({ pac: { ...config.pac, instruments: newIns } });
+                            }}
+                            className="flex-1 px-2.5 py-1 text-xs font-mono border border-slate-200 rounded-lg bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-300 focus:border-blue-300" />
+                        </div>
                       </div>
                     ))}
                     <div className="flex justify-between text-xs pt-1 px-2">
