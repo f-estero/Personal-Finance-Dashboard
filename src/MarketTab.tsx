@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
 import { TrendingUp, TrendingDown, RefreshCw, AlertCircle, ExternalLink, Info } from 'lucide-react'
-import * as yahooFinance from 'yahoo-finance2'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface Quote {
@@ -27,26 +26,17 @@ const fmt2 = (v: number) =>
 
 const fmtPct = (v: number) => `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`
 
-// ─── Yahoo Finance fetch ──────────────────────────────────────────────────────
+// ─── Yahoo Finance fetch via Vercel Function ──────────────────────────────────
 async function fetchQuote(ticker: string): Promise<Quote> {
   try {
-    const quote = await yahooFinance.quote(ticker)
+    const res = await fetch(`/api/quote?ticker=${encodeURIComponent(ticker)}`)
+    const data = await res.json()
 
-    if (!quote || quote.regularMarketPrice === null) {
-      throw new Error('Ticker non trovato')
+    if (!res.ok) {
+      throw new Error(data.error || 'Errore nel recupero dei dati')
     }
 
-    return {
-      ticker,
-      price: quote.regularMarketPrice || 0,
-      change: (quote.regularMarketPrice || 0) - (quote.regularMarketPreviousClose || 0),
-      changePct: quote.regularMarketChangePercent || 0,
-      high: quote.regularMarketDayHigh || 0,
-      low: quote.regularMarketDayLow || 0,
-      prevClose: quote.regularMarketPreviousClose || 0,
-      volume: quote.regularMarketVolume || 0,
-      updatedAt: new Date().toISOString().split('T')[0],
-    }
+    return data
   } catch (e: any) {
     throw new Error(e.message || 'Errore nel recupero dei dati')
   }
