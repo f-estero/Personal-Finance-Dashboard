@@ -19,8 +19,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    // URL dell'API Chart di Yahoo Finance (range 1d per avere quotazione odierna e metadati)
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(processedTicker)}?range=1d&interval=1d`
+    // URL dell'API Chart di Yahoo Finance (range 30d per avere quotazione odierna, storici e metadati)
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(processedTicker)}?range=30d&interval=1d`
     
     // Timeout di sicurezza di 5 secondi
     const controller = new AbortController()
@@ -65,7 +65,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const low = quote.low?.[0] || price
     const volume = quote.volume?.[0] || meta.regularMarketVolume || 0
 
-    // Restituisce la risposta nello schema dati originario atteso dal frontend
+    // Estrazione dei prezzi storici degli ultimi 30 giorni (rimuove i valori nulli)
+    const history: number[] = quote.close
+      ? quote.close.filter((v: any) => typeof v === 'number')
+      : []
+
+    // Aggiunge la chiusura del giorno corrente come ultimo punto se necessario
+    if (history.length > 0 && history[history.length - 1] !== price) {
+      history.push(price)
+    }
+
+    // Restituisce la risposta nello schema dati originario + array storico a 30d
     return res.status(200).json({
       ticker: processedTicker,
       price,
@@ -75,6 +85,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       low,
       prevClose,
       volume,
+      history,
       updatedAt: new Date().toISOString().split('T')[0],
     })
   } catch (e: any) {
