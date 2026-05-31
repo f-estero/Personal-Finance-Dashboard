@@ -31,9 +31,12 @@ const DEFAULT_CONFIG = {
   profile: { name: '', birthYear: new Date().getFullYear() - 30 },
   salary: { netAmount: 0, bonusAmount: 0, bonusMonths: [], payDay: 27, ral: 0 },
   pac: {
-    monthlyAmount: 0, payDay: 1, broker: '',
+    monthlyAmount: 1000, payDay: 1, broker: 'Fineco',
     instruments: [
-      { id: 'ins1', name: 'ETF 1', pct: 100, ter: 0.20, color: '#3b82f6', ticker: '' },
+      { id: 'ins1', name: 'Vanguard S&P 500', pct: 45, ter: 0.07, color: '#3b82f6', ticker: 'VUSA.LON', isin: 'IE00B3XXRP09' },
+      { id: 'ins2', name: 'iShares MSCI World ex-USA', pct: 35, ter: 0.15, color: '#10b981', ticker: 'XUSE.FRA', isin: 'IE00B4L60045' },
+      { id: 'ins3', name: 'Xtrackers MSCI Emerging Markets', pct: 15, ter: 0.18, color: '#f59e0b', ticker: 'XMEM.FRA', isin: 'IE00BTJRMP35' },
+      { id: 'ins4', name: 'iShares Physical Gold ETC', pct: 5, ter: 0.12, color: '#eab308', ticker: 'IGLN.LON', isin: 'IE00B1XNRC02' },
     ]
   },
   marketApiKey: '',
@@ -361,7 +364,18 @@ export default function PersonalFinanceDashboard() {
         const r = await window.storage.get(STORAGE_KEY);
         if (r) {
           const d = JSON.parse(r.value);
-          if (d.config) setConfig({ ...DEFAULT_CONFIG, ...d.config });
+          if (d.config) {
+            const loadedConfig = { ...DEFAULT_CONFIG, ...d.config };
+            // If the user has not configured custom instruments (i.e. still has the single generic ETF 1 default)
+            const insts = loadedConfig.pac?.instruments || [];
+            if (insts.length === 1 && (insts[0].name === 'ETF 1' || insts[0].name === 'Strumento 1')) {
+              loadedConfig.pac.instruments = DEFAULT_CONFIG.pac.instruments;
+              if (loadedConfig.pac.monthlyAmount === 0 || loadedConfig.pac.monthlyAmount === 100) {
+                loadedConfig.pac.monthlyAmount = 1000;
+              }
+            }
+            setConfig(loadedConfig);
+          }
           if (d.state) setState({ ...DEFAULT_STATE, ...d.state });
         } else {
           // Try legacy migration
@@ -2076,8 +2090,12 @@ export default function PersonalFinanceDashboard() {
                           <div className="flex items-center gap-3 mb-1.5">
                             <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: ins.color }} />
                             <div className="flex-1 min-w-0">
-                              <p className="text-sm font-medium text-slate-900 truncate">{ins.name}</p>
-                              <p className="text-[11px] text-slate-500">PAC {fmt(config.pac.monthlyAmount * ins.pct / 100)}/mese · TER {ins.ter}%</p>
+                              <p className="text-sm font-medium text-slate-900 truncate">
+                                {ins.name} {ins.isin && <span className="text-[10px] text-slate-400 font-mono ml-1.5">{ins.isin}</span>}
+                              </p>
+                              <p className="text-[11px] text-slate-500">
+                                {ins.ticker ? `${ins.ticker} · ` : ''}PAC {fmt(config.pac.monthlyAmount * ins.pct / 100)}/mese · TER {ins.ter}%
+                              </p>
                             </div>
                             <div className="text-right flex-shrink-0">
                               <p className="text-sm font-semibold tabular-nums" style={{ color: ins.color }}>{fmt(ins.actualValue)}</p>
@@ -3414,7 +3432,7 @@ export default function PersonalFinanceDashboard() {
                           }} suffix="%" step={0.5} />
                         </div>
                         <div className="flex items-center gap-2 pl-4">
-                          <span className="text-[11px] text-slate-400 w-16 flex-shrink-0">Ticker:</span>
+                          <span className="text-[11px] text-slate-400 w-12 flex-shrink-0">Ticker:</span>
                           <input type="text" value={ins.ticker || ''}
                             placeholder="es. VUSA.LON"
                             onChange={e => {
@@ -3423,6 +3441,15 @@ export default function PersonalFinanceDashboard() {
                               updateConfig({ pac: { ...config.pac, instruments: newIns } });
                             }}
                             className="flex-1 px-2.5 py-1 text-xs font-mono border border-slate-200 rounded-lg bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-300 focus:border-blue-300" />
+                          <span className="text-[11px] text-slate-400 w-10 flex-shrink-0 text-right">ISIN:</span>
+                          <input type="text" value={ins.isin || ''}
+                            placeholder="es. IE00B3XXRP09"
+                            onChange={e => {
+                              const newIns = [...config.pac.instruments];
+                              newIns[idx] = { ...newIns[idx], isin: e.target.value.toUpperCase() };
+                              updateConfig({ pac: { ...config.pac, instruments: newIns } });
+                            }}
+                            className="flex-1 px-2.5 py-1 text-xs font-mono border border-slate-200 rounded-lg bg-slate-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-300" />
                         </div>
                       </div>
                     ))}
