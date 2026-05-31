@@ -1213,54 +1213,85 @@ export default function PersonalFinanceDashboard() {
 
     const milestones: Milestone[] = [];
 
-    // Step ogni 5 anni da ora+5 fino a targetAge-1
-    const startAge = Math.ceil((currentAge + 3) / 5) * 5;
-    for (let age = startAge; age < targetAge; age += 5) {
-      const years = age - currentAge;
-      if (years <= 0) continue;
+    // 1. Aggiungiamo traguardi temporali a breve/medio termine (1, 3, 5 anni)
+    const timeIntervals = [1, 3, 5];
+    timeIntervals.forEach(years => {
+      if (currentAge + years >= targetAge) return;
       const mo = years * 12;
       const pacVal = calcFV(state.etfValue, pac, rate, mo);
       const fonteVal = calcFV(state.fonteValue, fonte, fonteRate, mo);
       const swr = Math.round(pacVal * 0.04 / 12);
       milestones.push({
-        year: currentYear + years, age,
-        label: `Patrimonio a ${age} anni`,
-        pacT: Math.round(pacVal), fonteT: Math.round(fonteVal),
-        note: swr > 0 ? `Rendita stimata ~${fmt(swr)}/mese · SWR 4%` : `Proiezione al ${rate}% reale`,
+        year: currentYear + years,
+        age: currentAge + years,
+        label: `Traguardo ${years} Ann${years === 1 ? 'o' : 'i'}`,
+        pacT: Math.round(pacVal),
+        fonteT: Math.round(fonteVal),
+        note: `Proiezione accumulo a ${years * 12} mesi con PAC (${swr > 0 ? 'rendita ~' + fmt(swr) + '/mese' : ''})`,
       });
-    }
+    });
 
-    // Target principale FIRE
+    // 2. Aggiungiamo traguardi basati su cifre tonde di capitale (Milestone di Capitale)
+    // Selezioniamo soglie sensate in base al capitale attuale dell'utente
+    const currentCapital = state.etfValue;
+    const thresholds = [25000, 50000, 75000, 100000, 150000, 200000, 250000, 300000, 400000, 500000, 750000, 1000000];
+    
+    // Trova i traguardi successivi non ancora raggiunti
+    const futureThresholds = thresholds.filter(t => t > currentCapital);
+
+    // Prendiamo i prossimi 4 traguardi futuri per non sovraffollare la lista
+    futureThresholds.slice(0, 4).forEach(targetVal => {
+      // Calcola i mesi necessari
+      const startVal = state.etfValue;
+      let months = 0;
+      if (startVal < targetVal) {
+        const r = rate / 12 / 100;
+        let projected = startVal;
+        while (projected < targetVal && months < 600) {
+          projected = projected * (1 + r) + pac;
+          months++;
+        }
+      }
+      
+      if (months > 0 && months < 600) {
+        const yearsFloat = months / 12;
+        const yearsInt = Math.floor(yearsFloat);
+        const milestoneAge = currentAge + yearsInt;
+        
+        // Evitiamo di sovraffollare o sovrapporci al target FIRE
+        if (milestoneAge >= targetAge) return;
+
+        const fonteVal = calcFV(state.fonteValue, fonte, fonteRate, months);
+        milestones.push({
+          year: currentYear + yearsInt,
+          age: milestoneAge,
+          label: `Traguardo Capitale ${fmtK(targetVal)}`,
+          pacT: targetVal,
+          fonteT: Math.round(fonteVal),
+          note: `Raggiungibile in circa ${months} mesi (~${(months/12).toFixed(1)} anni) di versamenti`,
+        });
+      }
+    });
+
+    // 3. Aggiungiamo il traguardo principale FIRE (età target)
     const targetYears = targetAge - currentAge;
     if (targetYears > 0) {
       const tPac = calcFV(state.etfValue, pac, rate, targetYears * 12);
       const tFonte = calcFV(state.fonteValue, fonte, fonteRate, targetYears * 12);
       milestones.push({
-        year: currentYear + targetYears, age: targetAge,
-        label: `TARGET FIRE — Ritiro a ${targetAge}`,
-        pacT: Math.round(tPac), fonteT: Math.round(tFonte),
-        note: `Rendita ~${fmt(Math.round(tPac * 0.04 / 12))}/mese · SWR 4%`,
+        year: currentYear + targetYears,
+        age: targetAge,
+        label: `TARGET FIRE — Ritiro a ${targetAge} anni`,
+        pacT: Math.round(tPac),
+        fonteT: Math.round(tFonte),
+        note: `Indipendenza finanziaria raggiunta · Rendita SWR 4% ~${fmt(Math.round(tPac * 0.04 / 12))}/mese`,
         isTarget: true,
       });
     }
 
-    // Target secondario +5 anni
-    const age2 = targetAge + 5;
-    const years2 = age2 - currentAge;
-    if (years2 > 0) {
-      const p2 = calcFV(state.etfValue, pac, rate, years2 * 12);
-      const f2 = calcFV(state.fonteValue, fonte, fonteRate, years2 * 12);
-      milestones.push({
-        year: currentYear + years2, age: age2,
-        label: `TARGET FIRE — Ritiro a ${age2}`,
-        pacT: Math.round(p2), fonteT: Math.round(f2),
-        note: `Rendita ~${fmt(Math.round(p2 * 0.04 / 12))}/mese · SWR 4%`,
-        isTarget: true,
-      });
-    }
-
-    return milestones;
-  }, [config, state.etfValue, state.fonteValue, state.fireParams, cy]);
+    // Ordiniamo tutte le milestone per anno/età
+    return milestones.sort((a, b) => a.year - b.year || a.pacT - b.pacT);
+  }, [state.etfValue, state.fonteValue, config, cy]);
 
   // ─── Tabs ───
   const TABS = [
