@@ -23,12 +23,30 @@
 .dark .border-slate-300 { border-color: #475569 !important; }
 
 /* ─── Text ─── */
-.dark .text-slate-900 { color: #f1f5f9 !important; }
-.dark .text-slate-800 { color: #e2e8f0 !important; }
-.dark .text-slate-700 { color: #cbd5e1 !important; }
-.dark .text-slate-600 { color: #94a3b8 !important; }
-.dark .text-slate-500 { color: #64748b !important; }
-.dark .text-slate-400 { color: #475569 !important; }
+.dark .text-slate-900 { color: #ffffff !important; }
+.dark .text-slate-800 { color: #ffffff !important; }
+.dark .text-slate-700 { color: #f8fafc !important; }
+.dark .text-slate-600 { color: #f1f5f9 !important; }
+.dark .text-slate-500 { color: #e2e8f0 !important; }
+.dark .text-slate-400 { color: #cbd5e1 !important; }
+.dark .text-slate-300 { color: #cbd5e1 !important; }
+.dark .text-slate-200 { color: #e2e8f0 !important; }
+.dark .text-slate-100 { color: #f1f5f9 !important; }
+
+/* ─── High Contrast Accent Texts ─── */
+.dark .text-emerald-700 { color: #34d399 !important; }
+.dark .text-emerald-600 { color: #34d399 !important; }
+.dark .text-emerald-800 { color: #a7f3d0 !important; }
+.dark .text-blue-700 { color: #60a5fa !important; }
+.dark .text-blue-600 { color: #60a5fa !important; }
+.dark .text-amber-700 { color: #fbbf24 !important; }
+.dark .text-amber-800 { color: #fde68a !important; }
+.dark .text-indigo-700 { color: #818cf8 !important; }
+.dark .text-purple-700 { color: #c084fc !important; }
+
+/* ─── High Contrast Borders ─── */
+.dark .border-emerald-600 { border-color: #34d399 !important; }
+.dark .border-emerald-500 { border-color: #34d399 !important; }
 
 /* ─── Accent Backgrounds (soft tints in dark) ─── */
 .dark .bg-emerald-50 { background-color: rgba(16, 185, 129, 0.1) !important; }
@@ -121,26 +139,29 @@ body {
    ═══════════════════════════════════════════════════════════ */
 
 @media print {
-  body {
+  html, body {
     background-color: white !important;
     color: black !important;
   }
-  
-  /* Nascondi l'intera applicazione eccetto il print container */
-  body > div:not(.print-container),
-  body > #root > div:not(.print-container),
-  header, main, footer, nav, .fixed {
+
+  /* Nascondi portali ed elementi esterni al root */
+  body > :not(#root) {
+    display: none !important;
+  }
+
+  /* Nascondi l'intera applicazione all'interno di root eccetto il print-container */
+  #root > div > :not(.print-container) {
     display: none !important;
   }
 
   .print-container {
     display: block !important;
-    position: absolute;
-    left: 0;
-    top: 0;
-    width: 100%;
-    margin: 0;
-    padding: 0;
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
     background: white !important;
   }
 
