@@ -1888,7 +1888,7 @@ export default function PersonalFinanceDashboard() {
                 {/* Cosa fare oggi (Contextual Actions Widget) */}
                 {(() => {
                   const actions = [];
-                  const lv3 = config.waterfallLevels[2];
+                  const lv3 = config.waterfallLevels?.[2] || { id: 'l3', name: 'Liquidità Operativa', cap: 0 };
                   const lv3Cur = state.waterfallCurrent.l3 || 0;
                   const lv4Cur = state.waterfallCurrent.l4 || 0;
                   const daysToPac = config.pac.payDay - cd;
@@ -1908,8 +1908,8 @@ export default function PersonalFinanceDashboard() {
                     actions.push({ priority: 2, icon: CreditCard, color: 'blue', title: 'PAC domani', desc: `Assicurati che ${fmt(config.pac.monthlyAmount)} sia disponibile su L3` });
                   }
 
-                  if (cd >= config.salary.payDay && state.events[salKey] && lv3Cur < lv3.cap * 0.7) {
-                    actions.push({ priority: 2, icon: Wallet, color: 'amber', title: 'L3 sotto soglia operativa', desc: `Liquidità operativa a ${fmt(lv3Cur)} (target ${fmt(lv3.cap)}) — rabbocca dal conto principale` });
+                  if (cd >= config.salary.payDay && state.events[salKey] && lv3 && lv3Cur < (lv3.cap || 0) * 0.7) {
+                    actions.push({ priority: 2, icon: Wallet, color: 'amber', title: 'L3 sotto soglia operativa', desc: `Liquidità operativa a ${fmt(lv3Cur)} (target ${fmt(lv3.cap || 0)}) — rabbocca dal conto principale` });
                   }
 
                   if (lv4Cur >= 1000) {
