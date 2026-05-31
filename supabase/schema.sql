@@ -30,3 +30,4 @@ ALTER TABLE public.user_data ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "select_own" ON public.user_data FOR SELECT USING (auth.uid() = user_id);
 CREATE POLICY "insert_own" ON public.user_data FOR INSERT WITH CHECK (auth.uid() = user_id);
 CREATE POLICY "update_own" ON public.user_data FOR UPDATE USING (auth.uid() = user_id);
+CREATE POLICY "delete_own" ON public.user_data FOR DELETE USING (auth.uid() = user_id);

@@ -3,3 +3,12 @@ dist
 .env
 .env.local
 *.log
+
+# Build/work artifacts
+diff.txt
+diff-utf8.txt
+*.diff
+
+# Local tooling / deploy state
+.vercel
+edge-profile

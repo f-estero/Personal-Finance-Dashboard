@@ -21,8 +21,27 @@ import {
 // CONSTANTS & DEFAULTS
 // ═══════════════════════════════════════════════════════════
 
-const APP_VERSION = '1.0';
+const APP_VERSION = '1.2';
 const STORAGE_KEY = 'pfd-v4';
+const SCHEMA_VERSION = 1;
+
+function runMigrations(payload: any): any {
+  if (!payload) return payload;
+  let currentVersion = payload.schemaVersion || 0;
+  
+  if (!payload.schemaVersion && payload.version === '1.0') {
+    currentVersion = 1;
+  }
+  
+  // Inserire qui eventuali migrazioni future:
+  // if (currentVersion < 2) {
+  //   currentVersion = 2;
+  // }
+  
+  payload.schemaVersion = currentVersion;
+  return payload;
+}
+
 const LEGACY_KEYS = ['pfd-v3', 'pfd-v2', 'pfd-v1', 'fondo-cassa-v2'];
 
 const MONTHS_IT = ['Gennaio','Febbraio','Marzo','Aprile','Maggio','Giugno','Luglio','Agosto','Settembre','Ottobre','Novembre','Dicembre'];
@@ -116,11 +135,49 @@ const safeNum = (v, fb = 0) => {
 };
 const monthKey = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 const todayKey = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; };
+
 const calcFV = (pv, pmt, annR, mo) => {
-  if (annR <= 0 || mo <= 0) return pv + pmt * Math.max(0, mo);
-  const r = annR / 12 / 100, f = Math.pow(1 + r, mo);
-  return pv * f + pmt * (f - 1) / r;
+  const clampedAnnR = Math.min(Math.max(annR || 0, -99), 100);
+  if (clampedAnnR <= 0 || mo <= 0) return pv + pmt * Math.max(0, mo);
+  const r = clampedAnnR / 12 / 100;
+  const f = Math.pow(1 + r, mo);
+  const result = pv * f + pmt * (f - 1) / r;
+  return isFinite(result) ? result : pv + pmt * Math.max(0, mo);
 };
+
+const generateId = (prefix: string = ''): string => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return prefix + crypto.randomUUID();
+  }
+  return prefix + Date.now() + '-' + Math.random().toString(36).slice(2, 9);
+};
+
+function sanitizeObject(obj: any): any {
+  if (obj === null || obj === undefined) return obj;
+  if (typeof obj === 'string') {
+    return obj.replace(/<[^>]*>/g, '').substring(0, 500);
+  }
+  if (typeof obj === 'number') {
+    if (!isFinite(obj) || isNaN(obj)) return 0;
+    if (obj > 1e12) return 1e12;
+    if (obj < -1e12) return -1e12;
+    return obj;
+  }
+  if (Array.isArray(obj)) {
+    return obj.map(item => sanitizeObject(item));
+  }
+  if (typeof obj === 'object') {
+    const cleaned: any = {};
+    for (const key in obj) {
+      if (Object.prototype.hasOwnProperty.call(obj, key)) {
+        cleaned[key] = sanitizeObject(obj[key]);
+      }
+    }
+    return cleaned;
+  }
+  return obj;
+}
+
 const ageFromYear = (by) => new Date().getFullYear() - by;
 const formatRelativeTime = (iso) => {
   if (!iso) return null;
@@ -273,8 +330,8 @@ function Sparkline({ data, isPositive }: { data?: number[]; isPositive?: boolean
   if (!data || data.length < 2) {
     return <div className="w-full h-6 flex items-center justify-center text-[10px] text-slate-400 font-mono tracking-wider">——</div>;
   }
-  const min = Math.min(...data);
-  const max = Math.max(...data);
+  const min = data.reduce((a, b) => Math.min(a, b), Infinity);
+  const max = data.reduce((a, b) => Math.max(a, b), -Infinity);
   const range = max - min === 0 ? 1 : max - min;
   const width = 100;
   const height = 30;
@@ -392,7 +449,8 @@ export default function PersonalFinanceDashboard() {
       try {
         const r = await storage.get(STORAGE_KEY);
         if (r) {
-          const d = JSON.parse(r.value);
+          const rawData = JSON.parse(r.value);
+          const d = runMigrations(rawData);
           if (d.config) {
             const rawC = d.config || {};
             const loadedConfig = {
@@ -534,7 +592,7 @@ export default function PersonalFinanceDashboard() {
       const snap = { date: today, etf: state.etfValue, fonte: state.fonteValue, liq, nw };
       const newSnaps = [...(state.snapshots || []).filter(s => s && s.date && s.date !== today), snap]
         .sort((a, b) => a.date.localeCompare(b.date))
-        .slice(-60);
+        .slice(-300);
       updateState({ snapshots: newSnaps });
       // Nessun toast — operazione silenziosa
     }
@@ -568,7 +626,7 @@ export default function PersonalFinanceDashboard() {
     const target = safeNum(newGoal.targetAmount);
     const current = safeNum(newGoal.currentAmount || 0);
     const newG = {
-      id: 'goal_' + Date.now(),
+      id: generateId('goal_'),
       title: newGoal.title,
       targetAmount: target,
       currentAmount: current,
@@ -593,7 +651,7 @@ export default function PersonalFinanceDashboard() {
     const existingColors = (config.pac.instruments || []).map((i: any) => i.color);
     const availableColor = HSL_COLORS.find(c => !existingColors.includes(c)) || HSL_COLORS[(config.pac.instruments || []).length % HSL_COLORS.length];
     const newIns = {
-      id: 'ins_' + Date.now() + '_' + Math.round(Math.random()*1000),
+      id: generateId('ins_'),
       name: `Strumento ${(config.pac.instruments || []).length + 1}`,
       pct: 0,
       ter: 0.15,
@@ -616,7 +674,7 @@ export default function PersonalFinanceDashboard() {
 
   // ─── Spese Fisse Helpers ───
   const addFixedExpense = () => {
-    const newKey = 'exp_' + Date.now() + '_' + Math.round(Math.random()*1000);
+    const newKey = generateId('exp_');
     const newExp = {
       amount: 0,
       label: 'Nuova Spesa Fissa',
@@ -640,7 +698,7 @@ export default function PersonalFinanceDashboard() {
 
   // ─── Spese Variabili Helpers ───
   const addVariableExpense = () => {
-    const newKey = 'var_' + Date.now() + '_' + Math.round(Math.random()*1000);
+    const newKey = generateId('var_');
     const newVar = {
       amount: 0,
       label: 'Nuova Spesa Variabile'
@@ -667,7 +725,7 @@ export default function PersonalFinanceDashboard() {
     const existingColors = (config.waterfallLevels || []).map((l: any) => l.color);
     const availableColor = HSL_COLORS.find(c => !existingColors.includes(c)) || HSL_COLORS[(config.waterfallLevels || []).length % HSL_COLORS.length];
     const newLv = {
-      id: 'lv_' + Date.now() + '_' + Math.round(Math.random()*1000),
+      id: generateId('lv_'),
       name: `Fondo Personalizzato ${(config.waterfallLevels || []).length + 1}`,
       desc: 'Scopo del fondo',
       cap: 1000,
@@ -725,7 +783,7 @@ export default function PersonalFinanceDashboard() {
       return;
     }
     const newMs = {
-      id: 'ms_' + Date.now(),
+      id: generateId('ms_'),
       label: newMsLabel.trim(),
       targetAmount: amount
     };
@@ -753,7 +811,7 @@ export default function PersonalFinanceDashboard() {
     const year = parseInt(String(newContrib.year)) || cy;
 
     const newC = {
-      id: 'contrib_' + Date.now(),
+      id: generateId('contrib_'),
       year,
       quarter,
       aderente,
@@ -855,7 +913,7 @@ export default function PersonalFinanceDashboard() {
           const totale = parseEuroValue(getRowValue(row, 'Totale', 'totale'));
 
           const newC = {
-            id: 'contrib_' + year + '_' + quarter + '_' + Date.now() + '_' + i,
+            id: generateId('contrib_'),
             year,
             quarter,
             aderente,
@@ -887,12 +945,20 @@ export default function PersonalFinanceDashboard() {
   };
 
   // ─── Auto-save (debounced) ───
+  const isDirtyRef = useRef(false);
+
+  useEffect(() => {
+    if (!loaded) return;
+    isDirtyRef.current = true;
+  }, [config, state, loaded]);
+
   useEffect(() => {
     if (!loaded) return;
     const t = setTimeout(async () => {
       try {
         setSyncStatus('saving');
-        await storage.set(STORAGE_KEY, JSON.stringify({ version: APP_VERSION, config, state }));
+        await storage.set(STORAGE_KEY, JSON.stringify({ version: APP_VERSION, schemaVersion: SCHEMA_VERSION, config, state }));
+        isDirtyRef.current = false;
         setSyncStatus('saved');
         setTimeout(() => setSyncStatus('idle'), 2000);
       } catch (err) {
@@ -902,6 +968,18 @@ export default function PersonalFinanceDashboard() {
     }, 600);
     return () => clearTimeout(t);
   }, [config, state, loaded]);
+
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (isDirtyRef.current || syncStatus === 'saving') {
+        e.preventDefault();
+        e.returnValue = 'Ci sono modifiche non salvate. Sei sicuro di voler uscire?';
+        return 'Ci sono modifiche non salvate. Sei sicuro di voler uscire?';
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [syncStatus]);
 
   // ─── Toast auto-dismiss ───
   useEffect(() => {
@@ -1039,11 +1117,7 @@ export default function PersonalFinanceDashboard() {
   [config.expenses]);
 
   const totalVariableExpenses = useMemo(() => {
-    const vars = config.variableExpenses || {
-      spesa:     { amount: 150, label: 'Spesa e Alimentari' },
-      trasporti: { amount: 100, label: 'Benzina e Trasporti' },
-      extra:     { amount: 100, label: 'Svago ed Extra' },
-    };
+    const vars = config.variableExpenses || {};
     return Object.values(vars).reduce((s, e: any) => s + safeNum(e?.amount), 0);
   }, [config.variableExpenses]);
 
@@ -1217,7 +1291,7 @@ export default function PersonalFinanceDashboard() {
     
     if (sched > 0) {
       newTxs.unshift({
-        id: Date.now(),
+        id: generateId('tx_'),
         date: today,
         amount: sched,
         type: 'expense',
@@ -1228,7 +1302,7 @@ export default function PersonalFinanceDashboard() {
     
     if (extr > 0) {
       newTxs.unshift({
-        id: Date.now() + 1, // ID unico
+        id: generateId('tx_'),
         date: today,
         amount: extr,
         type: 'expense',
@@ -1239,7 +1313,7 @@ export default function PersonalFinanceDashboard() {
 
     updateState({
       waterfallCurrent: newWf,
-      transactions: newTxs.slice(0, 200)
+      transactions: newTxs.slice(0, 2400)
     });
 
     setToast({
@@ -1259,9 +1333,8 @@ export default function PersonalFinanceDashboard() {
     for (const [lvId, delta] of Object.entries(entry.movements)) {
       newWf[lvId] = Math.max(0, (newWf[lvId] || 0) - delta);
     }
-    const patch = {
+    const patch: any = {
       events: { ...state.events, [eventKey]: null },
-      ledger: { ...state.ledger, [eventKey]: undefined },
       waterfallCurrent: newWf,
     };
     if (entry.type === 'pac_out' && entry.etfDelta) {
@@ -1296,7 +1369,7 @@ export default function PersonalFinanceDashboard() {
   const saveSnapshot = () => {
     const k = todayKey();
     const snap = { date: k, etf: state.etfValue, fonte: state.fonteValue, liq: totalLiq, nw: netWorth };
-    const newSnaps = [...(state.snapshots || []).filter(s => s && s.date && s.date !== k), snap].sort((a, b) => a.date.localeCompare(b.date)).slice(-60);
+    const newSnaps = [...(state.snapshots || []).filter(s => s && s.date && s.date !== k), snap].sort((a, b) => a.date.localeCompare(b.date)).slice(-300);
     updateState({ snapshots: newSnaps });
     setToast({ message: 'Snapshot salvato', type: 'success' });
   };
@@ -1343,7 +1416,7 @@ export default function PersonalFinanceDashboard() {
       newInstrumentValues[ins.id] = (safeNum(newInstrumentValues[ins.id]) + safeNum(voluntaryAlloc[ins.id] || 0));
     });
     const tx = {
-      id: Date.now(), date: todayKey(), amount: amt,
+      id: generateId('tx_'), date: todayKey(), amount: amt,
       type: 'expense', category: 'work',
       note: `Versamento volontario ETF · ${Object.entries(voluntaryAlloc).filter(([,v]) => safeNum(v) > 0).map(([k, v]) => `${config.pac.instruments.find(i => i.id === k)?.name?.split(' ')[0] || k} ${fmt(safeNum(v))}`).join(', ')}`
     };
@@ -1353,7 +1426,7 @@ export default function PersonalFinanceDashboard() {
       etfValueUpdatedAt: new Date().toISOString(),
       instrumentValues: newInstrumentValues,
       instrumentValuesUpdatedAt: new Date().toISOString(),
-      transactions: [tx, ...state.transactions].slice(0, 200),
+      transactions: [tx, ...state.transactions].slice(0, 2400),
     });
     setToast({ message: `Versamento volontario ${fmt(amt)} eseguito · +${fmt(amt)} su ETF`, type: 'success' });
     setVoluntaryAmount('');
@@ -1364,8 +1437,8 @@ export default function PersonalFinanceDashboard() {
   const addTransaction = () => {
     const amt = safeNum(newTx.amount);
     if (amt <= 0) { setToast({ message: 'Importo non valido', type: 'error' }); return; }
-    const tx = { id: Date.now(), date: todayKey(), amount: amt, type: newTx.type, category: newTx.category, note: newTx.note };
-    updateState({ transactions: [tx, ...state.transactions].slice(0, 200) });
+    const tx = { id: generateId('tx_'), date: todayKey(), amount: amt, type: newTx.type, category: newTx.category, note: newTx.note };
+    updateState({ transactions: [tx, ...state.transactions].slice(0, 2400) });
     setNewTx({ amount: '', type: 'income', category: 'other', note: '' });
     setShowAddTx(false);
     setToast({ message: 'Transazione aggiunta', type: 'success' });
@@ -1419,8 +1492,9 @@ export default function PersonalFinanceDashboard() {
           if (d.state.reviews && !Array.isArray(d.state.reviews)) throw new Error('La lista dei bilanci annuali deve essere un array.');
         }
 
-        if (d.config) setConfig({ ...DEFAULT_CONFIG, ...d.config });
-        if (d.state) setState({ ...DEFAULT_STATE, ...d.state });
+        const sanitizedData = sanitizeObject(d);
+        if (sanitizedData.config) setConfig({ ...DEFAULT_CONFIG, ...sanitizedData.config });
+        if (sanitizedData.state) setState({ ...DEFAULT_STATE, ...sanitizedData.state });
         setToast({ message: 'Dati importati con successo', type: 'success' });
       } catch (err: any) {
         console.error('Import error:', err);
@@ -2648,11 +2722,7 @@ export default function PersonalFinanceDashboard() {
                   <div>
                     <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2.5">Breakdown Spese Variabili</h4>
                     <div className="space-y-2">
-                      {Object.entries(config.variableExpenses || {
-                        spesa:     { amount: 150, label: 'Spesa e Alimentari' },
-                        trasporti: { amount: 100, label: 'Benzina e Trasporti' },
-                        extra:     { amount: 100, label: 'Svago ed Extra' },
-                      }).map(([key, exp]: [string, any]) => (
+                      {Object.entries(config.variableExpenses || {}).map(([key, exp]: [string, any]) => (
                         <div key={key} className="flex items-center justify-between p-2 rounded-lg bg-slate-50 dark:bg-slate-800/30 border border-slate-100 dark:border-slate-800">
                           <span className="text-xs font-medium text-slate-800 dark:text-slate-200">{exp.label}</span>
                           <span className="text-xs font-bold text-slate-900 dark:text-slate-100 tabular-nums">{fmt(exp.amount)}</span>
@@ -3837,7 +3907,7 @@ export default function PersonalFinanceDashboard() {
                     <Button variant="secondary" onClick={() => setShowAddReview(false)}>Annulla</Button>
                     <Button variant="primary" icon={Check} onClick={() => {
                       if (!newReview.title.trim()) { setToast({ message: 'Titolo richiesto', type: 'error' }); return; }
-                      const rev = { ...newReview, id: Date.now(), date: todayKey() };
+                      const rev = { ...newReview, id: generateId('rev_'), date: todayKey() };
                       updateState({ reviews: [rev, ...state.reviews] });
                       setShowAddReview(false);
                       setNewReview({ year: new Date().getFullYear(), title: '', summary: '', decisions: [] });
@@ -4427,6 +4497,7 @@ export default function PersonalFinanceDashboard() {
                   <Button onClick={exportData} variant="primary" icon={Download}>Esporta backup JSON</Button>
                   <Button onClick={() => fileInputRef.current?.click()} variant="secondary" icon={Upload}>Importa backup</Button>
                   <input ref={fileInputRef} type="file" accept=".json,application/json" onChange={importData} className="hidden" />
+                  <Button onClick={() => window.print()} variant="secondary" icon={FileText}>Genera Report PDF</Button>
                   <Button onClick={resetAll} variant="danger" icon={RotateCcw}>Reset dati</Button>
                 </div>
                 <div className="mt-3 bg-blue-50 border border-blue-200 rounded-lg p-3 flex items-start gap-2">
@@ -4459,9 +4530,15 @@ export default function PersonalFinanceDashboard() {
                       message: 'Verranno eliminati TUTTI i tuoi dati finanziari e il tuo account. Operazione irreversibile. Esporta un backup prima di procedere.',
                       onConfirm: async () => {
                         try {
-                          await storage.set('__delete__', '__delete__');
-                        } catch {}
-                        await supabase.from('user_data').delete().eq('user_id', (await supabase.auth.getUser()).data.user?.id || '');
+                          // Cancellazione completa account + dati via Edge Function
+                          // (l'utente auth non è eliminabile dal client senza service_role).
+                          const { error } = await supabase.functions.invoke('delete-account');
+                          if (error) throw error;
+                        } catch (e) {
+                          // Fallback: almeno i dati finanziari vengono rimossi (RLS-safe).
+                          await supabase.from('user_data').delete().eq('user_id', (await supabase.auth.getUser()).data.user?.id || '');
+                          setToast({ message: 'Dati eliminati, ma la cancellazione account ha richiesto un fallback. Contatta l\'amministratore.', type: 'error' });
+                        }
                         await supabase.auth.signOut();
                         setConfirmDialog(null);
                       },
@@ -5070,48 +5147,43 @@ export default function PersonalFinanceDashboard() {
         const scLean = calcScenario(7, fireBaseTarget * 0.75);
         const scFat = calcScenario(7, fireBaseTarget * 1.5);
 
-        // Calcolo dei cap effettivi dinamici dei buffer (l1 e l2)
-        const capL1 = config.waterfallLevels?.[0]?.cap || 5000;
-        const capL2 = config.waterfallLevels?.[1]?.cap || 2000;
-
         // Milestones
         const milestonesList = [
           {
             label: "Primo anno di PAC completato",
             progress: config.pac.monthlyAmount > 0 && state.snapshots.length >= 12 ? 100 : Math.min(100, (state.snapshots.length / 12) * 100),
             targetYear: currentYear
-          },
-          {
-            label: `Buffer ${config.waterfallLevels?.[0]?.name || 'L1'} (${fmt(capL1)}) raggiunto`,
-            progress: Math.min(100, ((state.waterfallCurrent.l1 || 0) / capL1) * 100),
-            targetYear: currentYear
-          },
-          {
-            label: `Buffer ${config.waterfallLevels?.[1]?.name || 'L2'} (${fmt(capL2)}) saturato`,
-            progress: Math.min(100, ((state.waterfallCurrent.l2 || 0) / capL2) * 100),
-            targetYear: currentYear
-          },
-          {
-            label: "Portafoglio > € 10.000",
-            progress: Math.min(100, (state.etfValue / 10000) * 100),
-            targetYear: state.etfValue >= 10000 ? currentYear : currentYear + 1
-          },
-          {
-            label: "Portafoglio > € 50.000",
-            progress: Math.min(100, (state.etfValue / 50000) * 100),
-            targetYear: state.etfValue >= 50000 ? currentYear : currentYear + Math.ceil(Math.max(0, 50000 - state.etfValue) / (config.pac.monthlyAmount * 12 || 12000))
-          },
-          {
-            label: "Portafoglio > € 100.000",
-            progress: Math.min(100, (state.etfValue / 100000) * 100),
-            targetYear: state.etfValue >= 100000 ? currentYear : currentYear + Math.ceil(Math.max(0, 100000 - state.etfValue) / (config.pac.monthlyAmount * 12 || 12000))
-          },
-          {
-            label: "Traguardo FIRE Raggiunto (Scenario Base)",
-            progress: Math.min(100, (netWorth / fireBaseTarget) * 100),
-            targetYear: netWorth >= fireBaseTarget ? currentYear : currentYear + Math.ceil(scBase.years)
           }
         ];
+
+        config.waterfallLevels?.forEach((lvl: any) => {
+          if (lvl.cap > 0) {
+            const currentAlloc = state.waterfallCurrent[lvl.id] || 0;
+            milestonesList.push({
+              label: `Buffer ${lvl.name} (${fmt(lvl.cap)}) raggiunto`,
+              progress: Math.min(100, (currentAlloc / lvl.cap) * 100),
+              targetYear: currentYear
+            });
+          }
+        });
+
+        MILESTONES.forEach((m: Milestone) => {
+          if (m.isTarget) {
+            milestonesList.push({
+              label: m.label,
+              progress: Math.min(100, (netWorth / fireBaseTarget) * 100),
+              targetYear: m.year
+            });
+          } else {
+            const targetVal = m.pacT;
+            const progress = targetVal > 0 ? Math.min(100, (state.etfValue / targetVal) * 100) : 100;
+            milestonesList.push({
+              label: m.label,
+              progress: progress,
+              targetYear: m.year
+            });
+          }
+        });
 
         return (
           <div className="print-container hidden print:block bg-white w-full">
@@ -5152,6 +5224,11 @@ export default function PersonalFinanceDashboard() {
               <div className="text-center border-t border-slate-100 pt-6">
                 <p className="text-xs font-bold text-slate-800 pdf-serif">Preparato per: <span className="pdf-gold-text text-sm">{config.profile.name || 'Utente'}</span></p>
                 <p className="text-[9px] text-slate-500 mt-1 font-medium">Data di Generazione: {todayStr}</p>
+                {state.etfValueUpdatedAt ? (
+                  <p className="text-[8.5px] text-slate-400 mt-0.5">Valori patrimoniali aggiornati: {formatRelativeTime(state.etfValueUpdatedAt)}</p>
+                ) : (
+                  <p className="text-[8.5px] text-slate-400 mt-0.5">Valori patrimoniali aggiornati: —</p>
+                )}
                 
                 <div className="mt-6 bg-[#0f1923] text-white border border-[#c9a84c] rounded-xl px-5 py-2.5 max-w-sm mx-auto text-[9px] tracking-wider uppercase font-black">
                   🔒 Strettamente Riservato & Confidenziale
@@ -5258,34 +5335,21 @@ export default function PersonalFinanceDashboard() {
                       </tr>
                     </thead>
                     <tbody>
-                      <tr>
-                        <td className="font-bold text-center">L1</td>
-                        <td className="font-semibold text-slate-800">{config.waterfallLevels?.[0]?.name || 'Buffer di Sicurezza'}</td>
-                        <td className="text-right tabular-nums font-semibold text-[#0f1923]">{fmt(state.waterfallCurrent.l1 || 0)}</td>
-                        <td className="text-right tabular-nums text-slate-500">{config.waterfallLevels?.[0]?.cap > 0 ? fmt(config.waterfallLevels[0].cap) : 'Permanente'}</td>
-                        <td className="text-slate-500 leading-normal">{config.waterfallLevels?.[0]?.desc || 'Quota permanente allocata a garanzia degli imprevisti straordinari.'}</td>
-                      </tr>
-                      <tr>
-                        <td className="font-bold text-center">L2</td>
-                        <td className="font-semibold text-slate-800">{config.waterfallLevels?.[1]?.name || 'Fondo Lifestyle'}</td>
-                        <td className="text-right tabular-nums font-semibold text-[#0f1923]">{fmt(state.waterfallCurrent.l2 || 0)}</td>
-                        <td className="text-right tabular-nums text-slate-500">{config.waterfallLevels?.[1]?.cap > 0 ? fmt(config.waterfallLevels[1].cap) : fmt(capL2)}</td>
-                        <td className="text-slate-500 leading-normal">{config.waterfallLevels?.[1]?.desc || 'Riserva dedicata a spese voluttuarie, viaggi prolungati e svago. Una volta raggiunto il cap, l\'accumulo si interrompe.'}</td>
-                      </tr>
-                      <tr>
-                        <td className="font-bold text-center">L3</td>
-                        <td className="font-semibold text-slate-800">{config.waterfallLevels?.[2]?.name || 'Liquidità Operativa'}</td>
-                        <td className="text-right tabular-nums font-semibold text-[#0f1923]">{fmt(state.waterfallCurrent.l3 || 0)}</td>
-                        <td className="text-right tabular-nums text-slate-500">{config.waterfallLevels?.[2]?.cap > 0 ? fmt(config.waterfallLevels[2].cap) : 'Dinamico'}</td>
-                        <td className="text-slate-500 leading-normal">{config.waterfallLevels?.[2]?.desc || 'Quota di passaggio per transato corrente mensile e la copertura degli addebiti diretti automatici SDD degli investimenti.'}</td>
-                      </tr>
-                      <tr>
-                        <td className="font-bold text-center">L4</td>
-                        <td className="font-semibold text-slate-800">{config.waterfallLevels?.[3]?.name || 'Overflow Investimenti'}</td>
-                        <td className="text-right tabular-nums font-semibold text-[#0f1923]">{fmt(state.waterfallCurrent.l4 || 0)}</td>
-                        <td className="text-right tabular-nums text-slate-500">Surplus</td>
-                        <td className="text-slate-500 leading-normal">{config.waterfallLevels?.[3]?.desc || 'Qualsiasi eccedenza liquida, una volta saturati i livelli protettivi 1-3, viene canalizzata regolarmente per eliminare il cash drag.'}</td>
-                      </tr>
+                      {config.waterfallLevels?.map((lvl: any, idx: number) => {
+                        const levelNum = idx + 1;
+                        const levelId = lvl.id;
+                        const currentAlloc = state.waterfallCurrent[levelId] || 0;
+                        const capText = lvl.cap > 0 ? fmt(lvl.cap) : (idx === config.waterfallLevels.length - 1 ? 'Surplus (Illimitato)' : 'Nessuno/Dinamico');
+                        return (
+                          <tr key={lvl.id}>
+                            <td className="font-bold text-center">L{levelNum}</td>
+                            <td className="font-semibold text-slate-800">{lvl.name}</td>
+                            <td className="text-right tabular-nums font-semibold text-[#0f1923]">{fmt(currentAlloc)}</td>
+                            <td className="text-right tabular-nums text-slate-500">{capText}</td>
+                            <td className="text-slate-500 leading-normal">{lvl.desc || '—'}</td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -5318,41 +5382,47 @@ export default function PersonalFinanceDashboard() {
                   <table className="pdf-table mb-3">
                     <thead>
                       <tr>
-                        <th style={{ width: '28%' }}>ETF Strumento</th>
+                        <th style={{ width: '35%' }}>ETF Strumento</th>
                         <th style={{ width: '15%' }}>ISIN</th>
-                        <th style={{ width: '17%' }}>Esposizione</th>
-                        <th style={{ width: '7%' }} className="text-right">Peso %</th>
-                        <th style={{ width: '11%' }} className="text-right">Versam./m</th>
-                        <th style={{ width: '7%' }} className="text-right">TER</th>
-                        <th style={{ width: '7%' }} className="text-center">Acc/Dist</th>
-                        <th style={{ width: '8%' }} className="text-right">Valore €</th>
+                        <th style={{ width: '20%' }}>Esposizione</th>
+                        <th style={{ width: '10%' }} className="text-right">Peso %</th>
+                        <th style={{ width: '10%' }} className="text-right">Versam./m</th>
+                        <th style={{ width: '10%' }} className="text-right">TER</th>
+                        <th style={{ width: '10%' }} className="text-right">Valore €</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {config.pac.instruments?.map(ins => {
-                        let exposure = "Azionario Globale";
-                        if (ins.name.toLowerCase().includes("s&p 500") || ins.name.toLowerCase().includes("usa")) exposure = "Azionario Nord America";
-                        else if (ins.name.toLowerCase().includes("world ex-usa") || ins.name.toLowerCase().includes("ex-us")) exposure = "Azionario Sviluppati ex-US";
-                        else if (ins.name.toLowerCase().includes("emerging") || ins.name.toLowerCase().includes("emergenti")) exposure = "Azionario Emergenti";
-                        else if (ins.name.toLowerCase().includes("gold") || ins.name.toLowerCase().includes("oro")) exposure = "Metalli Preziosi Fisici";
+                      {(!config.pac.instruments || config.pac.instruments.length === 0) ? (
+                        <tr>
+                          <td colSpan={7} className="text-center py-4 text-slate-400 italic text-[10px]">
+                            Nessuno strumento configurato nel PAC
+                          </td>
+                        </tr>
+                      ) : (
+                        config.pac.instruments.map(ins => {
+                          let exposure = "Azionario Globale";
+                          if (ins.name.toLowerCase().includes("s&p 500") || ins.name.toLowerCase().includes("usa")) exposure = "Azionario Nord America";
+                          else if (ins.name.toLowerCase().includes("world ex-usa") || ins.name.toLowerCase().includes("ex-us")) exposure = "Azionario Sviluppati ex-US";
+                          else if (ins.name.toLowerCase().includes("emerging") || ins.name.toLowerCase().includes("emergenti")) exposure = "Azionario Emergenti";
+                          else if (ins.name.toLowerCase().includes("gold") || ins.name.toLowerCase().includes("oro")) exposure = "Metalli Preziosi Fisici";
 
-                        const currentVal = state.instrumentValues?.[ins.id] != null && safeNum(state.instrumentValues[ins.id]) > 0
-                          ? safeNum(state.instrumentValues[ins.id])
-                          : (state.etfValue * ins.pct / 100);
+                          const currentVal = state.instrumentValues?.[ins.id] != null && safeNum(state.instrumentValues[ins.id]) > 0
+                            ? safeNum(state.instrumentValues[ins.id])
+                            : (state.etfValue * ins.pct / 100);
 
-                        return (
-                          <tr key={ins.id}>
-                            <td className="font-semibold text-slate-800">{ins.name}</td>
-                            <td className="tabular-nums font-medium text-slate-500">{ins.isin || 'IE00B3XXRP09'}</td>
-                            <td className="text-slate-600">{exposure}</td>
-                            <td className="text-right tabular-nums">{ins.pct}%</td>
-                            <td className="text-right tabular-nums">{fmt(config.pac.monthlyAmount * ins.pct / 100)}</td>
-                            <td className="text-right tabular-nums">{ins.ter}%</td>
-                            <td className="text-center">Acc</td>
-                            <td className="text-right tabular-nums font-semibold text-slate-800">{fmt(currentVal)}</td>
-                          </tr>
-                        );
-                      })}
+                          return (
+                            <tr key={ins.id}>
+                              <td className="font-semibold text-slate-800">{ins.name}</td>
+                              <td className="tabular-nums font-medium text-slate-500">{ins.isin || '—'}</td>
+                              <td className="text-slate-600">{exposure}</td>
+                              <td className="text-right tabular-nums">{ins.pct}%</td>
+                              <td className="text-right tabular-nums">{fmt(config.pac.monthlyAmount * ins.pct / 100)}</td>
+                              <td className="text-right tabular-nums">{ins.ter}%</td>
+                              <td className="text-right tabular-nums font-semibold text-slate-800">{fmt(currentVal)}</td>
+                            </tr>
+                          );
+                        })
+                      )}
                       <tr className="bg-slate-100 font-extrabold border-t border-slate-300">
                         <td className="pdf-serif text-[#0f1923]">Totale Portafoglio</td>
                         <td>-</td>
@@ -5360,16 +5430,17 @@ export default function PersonalFinanceDashboard() {
                         <td className="text-right tabular-nums">100%</td>
                         <td className="text-right tabular-nums">{fmt(config.pac.monthlyAmount)}</td>
                         <td className="text-right tabular-nums">{weightedTer.toFixed(2)}%</td>
-                        <td className="text-center">-</td>
                         <td className="text-right tabular-nums text-emerald-700">{fmt(state.etfValue)}</td>
                       </tr>
                     </tbody>
                   </table>
 
-                  <div className="bg-amber-50/50 border border-amber-200/60 rounded-xl p-2.5 text-[8.5px] text-[#0f1923] flex items-center gap-2">
-                    <span className="text-xs">💡</span>
-                    <span className="font-medium"><strong>Nota strategica di allocazione:</strong> Portafoglio globale altamente diversificato geograficamente con un hedge protettivo strutturale in oro fisico.</span>
-                  </div>
+                  {config.pac.instruments && config.pac.instruments.length > 0 ? (
+                    <div className="bg-blue-50/50 border border-blue-200/60 rounded-xl p-2.5 text-[8.5px] text-[#0f1923] flex items-center gap-2">
+                      <span className="text-xs">💡</span>
+                      <span className="font-medium"><strong>Nota strategica di allocazione:</strong> Asset allocation target composta da {config.pac.instruments.length} strumenti PAC con TER medio ponderato pari a {weightedTer.toFixed(2)}%.</span>
+                    </div>
+                  ) : null}
                 </div>
 
                 {/* SEZIONE 4: PIANO PREVIDENZIALE FON.TE */}
@@ -5403,8 +5474,8 @@ export default function PersonalFinanceDashboard() {
                         <span className="text-slate-500">Versamento/mese:</span>
                         <strong className="text-slate-800 tabular-nums">{fmt(fonteContrib)}</strong>
                       </div>
-                      <div className="text-[8px] text-slate-500 leading-normal">
-                        Ripartizione standard: <strong>1.0%</strong> Lavoratore · <strong>1.55%</strong> Datore di lavoro · <strong>100%</strong> TFR (pari al 6.91% della retribuzione).
+                      <div className="text-[8.5px] text-slate-500 leading-normal">
+                        Ripartizione e versamenti effettuati per il fondo previdenziale <strong>{config.fonte.name || 'Pensione'}</strong>. I contributi accumulati beneficiano della deducibilità fiscale.
                       </div>
                     </div>
 

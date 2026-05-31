@@ -58,7 +58,7 @@ export default function App() {
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault(); setBusy(true); setError('')
     if (password !== confirmPw) { setError('Le password non coincidono'); setBusy(false); return }
-    if (password.length < 6) { setError('Password minima 6 caratteri'); setBusy(false); return }
+    if (password.length < 8) { setError('Password minima 8 caratteri'); setBusy(false); return }
     const { error: err } = await supabase.auth.signUp({
       email, password,
       options: { emailRedirectTo: window.location.origin }
@@ -81,7 +81,7 @@ export default function App() {
   const handleReset = async (e: React.FormEvent) => {
     e.preventDefault(); setBusy(true); setError('')
     if (password !== confirmPw) { setError('Le password non coincidono'); setBusy(false); return }
-    if (password.length < 6) { setError('Password minima 6 caratteri'); setBusy(false); return }
+    if (password.length < 8) { setError('Password minima 8 caratteri'); setBusy(false); return }
     const { error: err } = await supabase.auth.updateUser({ password })
     setBusy(false)
     if (err) setError(err.message)
@@ -170,7 +170,7 @@ export default function App() {
             <div>
               <label className="text-xs font-medium text-slate-700 block mb-1.5">Password</label>
               <input type="password" required value={password} onChange={e => setPassword(e.target.value)}
-                placeholder="min. 6 caratteri"
+                placeholder="min. 8 caratteri"
                 className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white" />
             </div>
             <div>
@@ -253,7 +253,7 @@ export default function App() {
             <div>
               <label className="text-xs font-medium text-slate-700 block mb-1.5">Nuova password</label>
               <input type="password" required value={password} onChange={e => setPassword(e.target.value)}
-                placeholder="min. 6 caratteri"
+                placeholder="min. 8 caratteri"
                 className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white" />
             </div>
             <div>

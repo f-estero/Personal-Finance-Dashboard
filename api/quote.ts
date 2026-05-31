@@ -1,6 +1,46 @@
 import { VercelRequest, VercelResponse } from '@vercel/node'
 
+interface RateLimitInfo {
+  count: number;
+  resetTime: number;
+}
+
+const rateLimitMap = new Map<string, RateLimitInfo>();
+
+function cleanRateLimitMap() {
+  const now = Date.now();
+  for (const [ip, info] of rateLimitMap.entries()) {
+    if (now > info.resetTime) {
+      rateLimitMap.delete(ip);
+    }
+  }
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  // A1. Rate Limiting in-memory per IP
+  cleanRateLimitMap();
+  const ip = ((req.headers['x-forwarded-for'] as string) || (req.headers['x-real-ip'] as string) || 'anonymous').split(',')[0].trim();
+  const now = Date.now();
+  const limit = 30;
+  const windowMs = 60 * 1000;
+
+  let clientLimit = rateLimitMap.get(ip);
+  if (!clientLimit) {
+    clientLimit = { count: 0, resetTime: now + windowMs };
+    rateLimitMap.set(ip, clientLimit);
+  }
+
+  if (now > clientLimit.resetTime) {
+    clientLimit.count = 1;
+    clientLimit.resetTime = now + windowMs;
+  } else {
+    clientLimit.count++;
+  }
+
+  if (clientLimit.count > limit) {
+    return res.status(429).json({ error: 'Troppe richieste. Riprova tra un minuto.' })
+  }
+
   const { ticker } = req.query
 
   if (!ticker || typeof ticker !== 'string') {
@@ -16,6 +56,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     processedTicker = processedTicker.replace('.MIL', '.MI') // Traduzione Borsa Italiana (.MIL -> .MI)
   } else if (processedTicker.endsWith('.BIT')) {
     processedTicker = processedTicker.replace('.BIT', '.MI') // Traduzione Borsa Italiana (.BIT -> .MI)
+  }
+
+  // A2. Validazione rigorosa regex del ticker per evitare SSRF o parametri malformati
+  const tickerRegex = /^[A-Z0-9.\-^=]{1,20}$/
+  if (!tickerRegex.test(processedTicker)) {
+    return res.status(400).json({ error: 'Ticker non valido' })
   }
 
   try {
@@ -82,6 +128,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const volume = quote.volume?.[0] || meta.regularMarketVolume || 0
 
     // Restituisce la risposta nello schema dati originario + array storico a 30d
+    res.setHeader('Cache-Control', 'public, max-age=60, s-maxage=60')
     return res.status(200).json({
       ticker: processedTicker,
       price,
