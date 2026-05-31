@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import * as XLSX from 'xlsx';
-import { supabase } from './supabase';
+import { supabase, storage } from './supabase';
 import MarketTab from './MarketTab';
 import {
   LineChart, Line, AreaChart, Area, PieChart, Pie, Cell,
@@ -403,27 +403,97 @@ export default function PersonalFinanceDashboard() {
   useEffect(() => {
     (async () => {
       try {
-        const r = await window.storage.get(STORAGE_KEY);
+        const r = await storage.get(STORAGE_KEY);
         if (r) {
           const d = JSON.parse(r.value);
           if (d.config) {
-            const loadedConfig = { ...DEFAULT_CONFIG, ...d.config };
-            // If the user has not configured custom instruments (i.e. still has the single generic ETF 1 default)
-            const insts = loadedConfig.pac?.instruments || [];
-            if (insts.length === 1 && (insts[0].name === 'ETF 1' || insts[0].name === 'Strumento 1')) {
+            const rawC = d.config || {};
+            const loadedConfig = {
+              ...DEFAULT_CONFIG,
+              ...rawC,
+              profile: {
+                name: rawC.profile?.name ?? DEFAULT_CONFIG.profile.name,
+                birthYear: safeNum(rawC.profile?.birthYear, DEFAULT_CONFIG.profile.birthYear),
+              },
+              salary: {
+                netAmount: safeNum(rawC.salary?.netAmount, DEFAULT_CONFIG.salary.netAmount),
+                bonusAmount: safeNum(rawC.salary?.bonusAmount, DEFAULT_CONFIG.salary.bonusAmount),
+                bonusMonths: Array.isArray(rawC.salary?.bonusMonths) ? rawC.salary.bonusMonths : DEFAULT_CONFIG.salary.bonusMonths,
+                payDay: safeNum(rawC.salary?.payDay, DEFAULT_CONFIG.salary.payDay),
+                ral: safeNum(rawC.salary?.ral, DEFAULT_CONFIG.salary.ral),
+              },
+              pac: {
+                monthlyAmount: safeNum(rawC.pac?.monthlyAmount, DEFAULT_CONFIG.pac.monthlyAmount),
+                payDay: safeNum(rawC.pac?.payDay, DEFAULT_CONFIG.pac.payDay),
+                broker: rawC.pac?.broker ?? DEFAULT_CONFIG.pac.broker,
+                instruments: Array.isArray(rawC.pac?.instruments) ? rawC.pac.instruments : DEFAULT_CONFIG.pac.instruments,
+              },
+              fonte: {
+                monthlyContribution: safeNum(rawC.fonte?.monthlyContribution, DEFAULT_CONFIG.fonte.monthlyContribution),
+                ter: safeNum(rawC.fonte?.ter, DEFAULT_CONFIG.fonte.ter),
+                comparto: rawC.fonte?.comparto ?? DEFAULT_CONFIG.fonte.comparto,
+                contributions: Array.isArray(rawC.fonte?.contributions) ? rawC.fonte.contributions : DEFAULT_CONFIG.fonte.contributions,
+                annualDeductibleOverride: rawC.fonte?.annualDeductibleOverride !== undefined ? rawC.fonte.annualDeductibleOverride : DEFAULT_CONFIG.fonte.annualDeductibleOverride,
+              },
+              expenses: typeof rawC.expenses === 'object' && rawC.expenses !== null
+                ? { ...DEFAULT_CONFIG.expenses, ...rawC.expenses }
+                : DEFAULT_CONFIG.expenses,
+              variableExpenses: typeof rawC.variableExpenses === 'object' && rawC.variableExpenses !== null
+                ? { ...DEFAULT_CONFIG.variableExpenses, ...rawC.variableExpenses }
+                : DEFAULT_CONFIG.variableExpenses,
+              waterfallLevels: Array.isArray(rawC.waterfallLevels) ? rawC.waterfallLevels : DEFAULT_CONFIG.waterfallLevels,
+              goals: Array.isArray(rawC.goals) ? rawC.goals : DEFAULT_CONFIG.goals,
+              darkMode: typeof rawC.darkMode === 'boolean' ? rawC.darkMode : DEFAULT_CONFIG.darkMode,
+              contoDepositoAmount: safeNum(rawC.contoDepositoAmount, DEFAULT_CONFIG.contoDepositoAmount),
+              contoDepositoRate: safeNum(rawC.contoDepositoRate, DEFAULT_CONFIG.contoDepositoRate),
+            };
+
+            const insts = loadedConfig.pac.instruments || [];
+            if (insts.length === 0 || (insts.length === 1 && (insts[0].name === 'ETF 1' || insts[0].name === 'Strumento 1'))) {
               loadedConfig.pac.instruments = DEFAULT_CONFIG.pac.instruments;
               if (loadedConfig.pac.monthlyAmount === 0 || loadedConfig.pac.monthlyAmount === 100) {
                 loadedConfig.pac.monthlyAmount = 1000;
               }
             }
+
+            // Garanzia assoluta che ogni strumento abbia un ID univoco
+            loadedConfig.pac.instruments = loadedConfig.pac.instruments.map((ins: any, idx: number) => ({
+              ...ins,
+              id: ins.id || `ins${idx + 1}`
+            }));
+
             setConfig(loadedConfig);
           }
-          if (d.state) setState({ ...DEFAULT_STATE, ...d.state });
+
+          if (d.state) {
+            const rawS = d.state || {};
+            const loadedState = {
+              ...DEFAULT_STATE,
+              ...rawS,
+              waterfallCurrent: typeof rawS.waterfallCurrent === 'object' && rawS.waterfallCurrent !== null
+                ? { ...DEFAULT_STATE.waterfallCurrent, ...rawS.waterfallCurrent }
+                : DEFAULT_STATE.waterfallCurrent,
+              fireParams: {
+                rate: safeNum(rawS.fireParams?.rate, DEFAULT_STATE.fireParams.rate),
+                fonteRate: safeNum(rawS.fireParams?.fonteRate, DEFAULT_STATE.fireParams.fonteRate),
+                retireAge: safeNum(rawS.fireParams?.retireAge, DEFAULT_STATE.fireParams.retireAge),
+              },
+              instrumentValues: typeof rawS.instrumentValues === 'object' && rawS.instrumentValues !== null
+                ? { ...DEFAULT_STATE.instrumentValues, ...rawS.instrumentValues }
+                : DEFAULT_STATE.instrumentValues,
+              snapshots: Array.isArray(rawS.snapshots) ? rawS.snapshots : DEFAULT_STATE.snapshots,
+              events: typeof rawS.events === 'object' && rawS.events !== null ? rawS.events : DEFAULT_STATE.events,
+              ledger: typeof rawS.ledger === 'object' && rawS.ledger !== null ? rawS.ledger : DEFAULT_STATE.ledger,
+              transactions: Array.isArray(rawS.transactions) ? rawS.transactions : DEFAULT_STATE.transactions,
+              reviews: Array.isArray(rawS.reviews) ? rawS.reviews : DEFAULT_STATE.reviews,
+            };
+            setState(loadedState);
+          }
         } else {
           // Try legacy migration
           for (const lk of LEGACY_KEYS) {
             try {
-              const old = await window.storage.get(lk);
+              const old = await storage.get(lk);
               if (old) {
                 const d = JSON.parse(old.value);
                 const migrated = { ...DEFAULT_STATE };
@@ -687,7 +757,7 @@ export default function PersonalFinanceDashboard() {
     const t = setTimeout(async () => {
       try {
         setSyncStatus('saving');
-        await window.storage.set(STORAGE_KEY, JSON.stringify({ version: APP_VERSION, config, state }));
+        await storage.set(STORAGE_KEY, JSON.stringify({ version: APP_VERSION, config, state }));
         setSyncStatus('saved');
         setTimeout(() => setSyncStatus('idle'), 2000);
       } catch (err) {
@@ -830,7 +900,7 @@ export default function PersonalFinanceDashboard() {
   // ─── Spese fisse e variabili stimate ───
   const EXPENSE_ICONS = { home: Home, zap: Zap, tv: Tv, shield: Shield, phone: Phone };
   const totalFixedExpenses = useMemo(() =>
-    Object.values(config.expenses || {}).reduce((s, e: any) => s + safeNum(e.amount), 0),
+    Object.values(config.expenses || {}).reduce((s, e: any) => s + safeNum(e?.amount), 0),
   [config.expenses]);
 
   const totalVariableExpenses = useMemo(() => {
@@ -839,7 +909,7 @@ export default function PersonalFinanceDashboard() {
       trasporti: { amount: 100, label: 'Benzina e Trasporti' },
       extra:     { amount: 100, label: 'Svago ed Extra' },
     };
-    return Object.values(vars).reduce((s, e: any) => s + safeNum(e.amount), 0);
+    return Object.values(vars).reduce((s, e: any) => s + safeNum(e?.amount), 0);
   }, [config.variableExpenses]);
 
   const realDisposable = currentSalary - totalFixedExpenses - totalVariableExpenses; // dopo spese fisse e variabili stimate
@@ -3902,7 +3972,7 @@ export default function PersonalFinanceDashboard() {
                       message: 'Verranno eliminati TUTTI i tuoi dati finanziari e il tuo account. Operazione irreversibile. Esporta un backup prima di procedere.',
                       onConfirm: async () => {
                         try {
-                          await window.storage.set('__delete__', '__delete__');
+                          await storage.set('__delete__', '__delete__');
                         } catch {}
                         await supabase.from('user_data').delete().eq('user_id', (await supabase.auth.getUser()).data.user?.id || '');
                         await supabase.auth.signOut();
