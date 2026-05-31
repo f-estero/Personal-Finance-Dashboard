@@ -56,6 +56,13 @@ const DEFAULT_CONFIG = {
   fireNumber: 0,
   monthlyDesiredIncome: 0,
   darkMode: false,
+  variableExpenses: {
+    spesa:     { amount: 150, label: 'Spesa e Alimentari' },
+    trasporti: { amount: 100, label: 'Benzina e Trasporti' },
+    extra:     { amount: 100, label: 'Svago ed Extra' },
+  },
+  contoDepositoAmount: 0,
+  contoDepositoRate: 1.5,
 };
 
 const DEFAULT_STATE = {
@@ -555,12 +562,22 @@ export default function PersonalFinanceDashboard() {
   const totalInv = state.etfValue + state.fonteValue;
   const netWorth = totalInv + totalLiq;
 
-  // ─── Spese fisse ───
+  // ─── Spese fisse e variabili stimate ───
   const EXPENSE_ICONS = { home: Home, zap: Zap, tv: Tv, shield: Shield, phone: Phone };
   const totalFixedExpenses = useMemo(() =>
     Object.values(config.expenses || {}).reduce((s, e: any) => s + safeNum(e.amount), 0),
   [config.expenses]);
-  const realDisposable = currentSalary - totalFixedExpenses; // dopo spese fisse
+
+  const totalVariableExpenses = useMemo(() => {
+    const vars = config.variableExpenses || {
+      spesa:     { amount: 150, label: 'Spesa e Alimentari' },
+      trasporti: { amount: 100, label: 'Benzina e Trasporti' },
+      extra:     { amount: 100, label: 'Svago ed Extra' },
+    };
+    return Object.values(vars).reduce((s, e: any) => s + safeNum(e.amount), 0);
+  }, [config.variableExpenses]);
+
+  const realDisposable = currentSalary - totalFixedExpenses - totalVariableExpenses; // dopo spese fisse e variabili stimate
   const realMargin = realDisposable - config.pac.monthlyAmount; // dopo PAC
 
   // Recent snapshot delta
@@ -1019,6 +1036,23 @@ export default function PersonalFinanceDashboard() {
     return { currentGrowth, progress, targetNw, remainingToTarget, startNw: startOfYear.nw, targetPct };
   }, [state.snapshots, netWorth, config.annualGrowthTarget, cy]);
 
+  // ─── Conto Deposito Lordo/Netto ───
+  const contoDepositoData = useMemo(() => {
+    const amount = config.contoDepositoAmount || 0;
+    const rate = config.contoDepositoRate || 1.5;
+    const grossInterest = amount * (rate / 100);
+    const taxRate = 0.26; // Ritenuta fiscale in Italia 26%
+    const netInterest = grossInterest * (1 - taxRate);
+    const netInterestDaily = netInterest / 365;
+    
+    // Equivalente caffè al giorno (ipotizziamo un costo di €1.20 a caffè)
+    const caffeDaily = netInterestDaily / 1.20;
+    
+    const freeLiq = Math.max(0, totalLiq - amount);
+    
+    return { amount, rate, grossInterest, netInterest, netInterestDaily, caffeDaily, freeLiq };
+  }, [config.contoDepositoAmount, config.contoDepositoRate, totalLiq]);
+
   // ─── Monthly history grid (last 12 months) ───
   const monthlyHistory = useMemo(() => {
     const rows = [];
@@ -1275,6 +1309,14 @@ export default function PersonalFinanceDashboard() {
             {syncStatus === 'error' && <><div className="w-2 h-2 rounded-full bg-rose-500" /><span className="text-rose-600 hidden sm:inline">Errore sync</span></>}
             {syncStatus === 'idle' && <><div className="w-2 h-2 rounded-full bg-emerald-400" /><span className="text-slate-400 hidden sm:inline">Cloud sync attivo</span></>}
           </div>
+          <button
+            onClick={() => window.print()}
+            className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors flex items-center gap-1"
+            title="Stampa Report PDF"
+          >
+            <FileText size={16} />
+            <span className="text-xs font-semibold hidden md:inline">Esporta PDF</span>
+          </button>
           <button
             onClick={() => updateConfig({ darkMode: !config.darkMode })}
             className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
@@ -1608,24 +1650,28 @@ export default function PersonalFinanceDashboard() {
                 {/* Summary */}
                 <div className="border-t border-slate-100 pt-4 space-y-3">
                   {/* Riga principale */}
-                  <div className="grid grid-cols-4 gap-2">
+                  <div className="grid grid-cols-5 gap-1.5 sm:gap-2">
                     <div className="text-center">
-                      <div className="text-base font-semibold text-emerald-700 tabular-nums">{fmt(currentSalary)}</div>
-                      <div className="text-[10px] text-slate-500">Stipendio</div>
+                      <div className="text-sm sm:text-base font-semibold text-emerald-700 tabular-nums">{fmt(currentSalary)}</div>
+                      <div className="text-[9px] sm:text-[10px] text-slate-500">Stipendio</div>
                     </div>
                     <div className="text-center">
-                      <div className="text-base font-semibold text-rose-600 tabular-nums">−{fmt(totalFixedExpenses)}</div>
-                      <div className="text-[10px] text-slate-500">Spese fisse</div>
+                      <div className="text-sm sm:text-base font-semibold text-rose-600 tabular-nums">−{fmt(totalFixedExpenses)}</div>
+                      <div className="text-[9px] sm:text-[10px] text-slate-500">Spese fisse</div>
                     </div>
                     <div className="text-center">
-                      <div className="text-base font-semibold text-indigo-600 tabular-nums">−{fmt(config.pac.monthlyAmount)}</div>
-                      <div className="text-[10px] text-slate-500">PAC</div>
+                      <div className="text-sm sm:text-base font-semibold text-rose-500 tabular-nums">−{fmt(totalVariableExpenses)}</div>
+                      <div className="text-[9px] sm:text-[10px] text-slate-500">Spese var.</div>
                     </div>
                     <div className="text-center">
-                      <div className={`text-base font-semibold tabular-nums ${realMargin >= 0 ? 'text-blue-700' : 'text-amber-600'}`}>
+                      <div className="text-sm sm:text-base font-semibold text-indigo-600 tabular-nums">−{fmt(config.pac.monthlyAmount)}</div>
+                      <div className="text-[9px] sm:text-[10px] text-slate-500">PAC</div>
+                    </div>
+                    <div className="text-center">
+                      <div className={`text-sm sm:text-base font-semibold tabular-nums ${realMargin >= 0 ? 'text-blue-700' : 'text-amber-600'}`}>
                         {realMargin >= 0 ? '+' : ''}{fmt(realMargin)}
                       </div>
-                      <div className="text-[10px] text-slate-500">Margine reale</div>
+                      <div className="text-[9px] sm:text-[10px] text-slate-500">Margine reale</div>
                     </div>
                   </div>
                   {/* Alert margine */}
@@ -1718,6 +1764,48 @@ export default function PersonalFinanceDashboard() {
                     </div>
                   );
                 })}
+
+                {/* Conto Deposito split inside Waterfall card */}
+                {contoDepositoData && (
+                  <div className="border-t border-slate-100 pt-4 mt-2">
+                    <div className="flex items-center justify-between text-xs font-semibold text-slate-700 mb-1.5">
+                      <span className="flex items-center gap-1"><PiggyBank size={14} className="text-amber-500" />Ripartizione Liquidità</span>
+                      <span className="tabular-nums">Deposito: {((contoDepositoData.amount / (totalLiq || 1)) * 100).toFixed(0)}%</span>
+                    </div>
+                    <div className="flex h-3 rounded-full overflow-hidden bg-slate-100 mb-3 border border-slate-200">
+                      {contoDepositoData.freeLiq > 0 && (
+                        <div className="bg-slate-400 h-full transition-all" style={{ width: `${(contoDepositoData.freeLiq / (totalLiq || 1)) * 100}%` }} title={`Corrente: ${fmt(contoDepositoData.freeLiq)}`} />
+                      )}
+                      {contoDepositoData.amount > 0 && (
+                        <div className="bg-amber-50 h-full transition-all" style={{ width: `${(contoDepositoData.amount / (totalLiq || 1)) * 100}%` }} title={`Conto Deposito: ${fmt(contoDepositoData.amount)}`} />
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 mb-3">
+                      <div className="bg-slate-50/50 rounded-lg p-2 border border-slate-100">
+                        <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider block">Liquidità Corrente</span>
+                        <span className="text-xs sm:text-sm font-bold text-slate-800 tabular-nums">{fmt(contoDepositoData.freeLiq)}</span>
+                      </div>
+                      <div className="bg-amber-50/50 rounded-lg p-2 border border-amber-100">
+                        <span className="text-[9px] font-bold text-amber-600 uppercase tracking-wider block">Conto Deposito (1.5%)</span>
+                        <span className="text-xs sm:text-sm font-bold text-amber-800 tabular-nums">{fmt(contoDepositoData.amount)}</span>
+                      </div>
+                    </div>
+                    {contoDepositoData.amount > 0 && (
+                      <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800 flex items-start gap-2.5">
+                        <Coffee size={16} className="text-amber-600 flex-shrink-0 mt-0.5" />
+                        <div>
+                          <p className="font-semibold text-[10px] sm:text-[11px] uppercase tracking-wider">Rendimento Conto Deposito</p>
+                          <p className="text-[11px] mt-0.5">
+                            Rendimento netto: <strong>{fmt2(contoDepositoData.netInterest)}/anno</strong> (lordo {fmt2(contoDepositoData.grossInterest)}).
+                          </p>
+                          <p className="text-[10px] text-amber-600 mt-1 font-medium italic">
+                            Guadagno netto di <strong>{fmt2(contoDepositoData.netInterestDaily)}/giorno</strong> — equivale a <strong>~{contoDepositoData.caffeDaily.toFixed(1)} caffè al giorno!</strong>
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </Card>
 
@@ -3233,6 +3321,54 @@ export default function PersonalFinanceDashboard() {
             </Card>
 
             <Card>
+              <CardHeader title="Spese Variabili Stimate" subtitle="Budget mensile stimato per evitare sovrastime della liquidità cashflow" icon={Receipt} accentColor="rose" />
+              <div className="px-5 pb-5 grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                  <label className="text-xs text-slate-500 font-medium block mb-1.5">Spesa e Alimentari (€/mese)</label>
+                  <MoneyInput value={config.variableExpenses?.spesa?.amount ?? 150} onChange={v => updateConfig({
+                    variableExpenses: {
+                      ...config.variableExpenses,
+                      spesa: { ...config.variableExpenses?.spesa, amount: safeNum(v) }
+                    }
+                  })} />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500 font-medium block mb-1.5">Benzina e Trasporti (€/mese)</label>
+                  <MoneyInput value={config.variableExpenses?.trasporti?.amount ?? 100} onChange={v => updateConfig({
+                    variableExpenses: {
+                      ...config.variableExpenses,
+                      trasporti: { ...config.variableExpenses?.trasporti, amount: safeNum(v) }
+                    }
+                  })} />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500 font-medium block mb-1.5">Svago ed Extra (€/mese)</label>
+                  <MoneyInput value={config.variableExpenses?.extra?.amount ?? 100} onChange={v => updateConfig({
+                    variableExpenses: {
+                      ...config.variableExpenses,
+                      extra: { ...config.variableExpenses?.extra, amount: safeNum(v) }
+                    }
+                  })} />
+                </div>
+              </div>
+            </Card>
+
+            <Card>
+              <CardHeader title="Conto Deposito Svincolato" subtitle="Liquidità fruttifera a basso rischio per far maturare piccoli interessi" icon={PiggyBank} accentColor="amber" />
+              <div className="px-5 pb-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs text-slate-500 font-medium block mb-1.5">Quota in Conto Deposito (€)</label>
+                  <MoneyInput value={config.contoDepositoAmount ?? 0} onChange={v => updateConfig({ contoDepositoAmount: safeNum(v) })} />
+                  <p className="text-[10px] text-slate-400 mt-1">Quota massima consigliata: {fmt(totalLiq)} (tutta la liquidità)</p>
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500 font-medium block mb-1.5">Tasso d'interesse annuo lordo (%)</label>
+                  <NumberInput value={config.contoDepositoRate ?? 1.5} onChange={v => updateConfig({ contoDepositoRate: v })} suffix="%" step={0.1} />
+                </div>
+              </div>
+            </Card>
+
+            <Card>
               <CardHeader title="Gestione dati" subtitle="Backup, ripristino e reset" icon={FileText} accentColor="rose" />
               <div className="px-5 pb-5">
                 <div className="flex flex-wrap gap-2">
@@ -3748,6 +3884,199 @@ export default function PersonalFinanceDashboard() {
           </div>
         </div>
       )}
+
+      {/* ═══════════ WEALTH REPORT PRINT CONTAINER ═══════════ */}
+      <div className="print-container hidden print:block w-full text-slate-900 bg-white p-12">
+        
+        {/* PAGINA 1: COVER PAGE */}
+        <div className="flex flex-col justify-between h-[280mm] border-4 border-double border-slate-300 p-8" style={{ pageBreakAfter: 'always' }}>
+          <div className="text-center mt-20">
+            <div className="w-16 h-16 bg-gradient-to-br from-slate-700 to-slate-900 rounded-2xl flex items-center justify-center text-white mx-auto shadow-md mb-6">
+              <Wallet size={32} strokeWidth={1.8} />
+            </div>
+            <h1 className="text-3xl font-extrabold uppercase tracking-widest text-slate-900 mt-4">Wealth Management</h1>
+            <p className="text-sm font-semibold tracking-wider text-slate-500 uppercase mt-2">Report Finanziario & Analisi Patrimoniale</p>
+            <div className="w-24 h-1 bg-gradient-to-r from-emerald-500 to-indigo-500 mx-auto mt-6" />
+          </div>
+
+          <div className="text-center my-auto">
+            <p className="text-[11px] uppercase font-bold tracking-widest text-slate-400 mb-1">Patrimonio Netto Complessivo</p>
+            <h2 className="text-5xl font-black text-slate-900 tabular-nums">{fmt(netWorth)}</h2>
+            <div className="mt-8 grid grid-cols-3 gap-4 max-w-md mx-auto text-xs border-t border-b border-slate-100 py-4">
+              <div>
+                <span className="text-slate-400 uppercase tracking-wider block font-semibold text-[9px] mb-0.5">Asset ETF</span>
+                <span className="font-bold text-slate-800">{fmt(state.etfValue)}</span>
+              </div>
+              <div>
+                <span className="text-slate-400 uppercase tracking-wider block font-semibold text-[9px] mb-0.5">Previdenza</span>
+                <span className="font-bold text-slate-800">{fmt(state.fonteValue)}</span>
+              </div>
+              <div>
+                <span className="text-slate-400 uppercase tracking-wider block font-semibold text-[9px] mb-0.5">Liquidità</span>
+                <span className="font-bold text-slate-800">{fmt(totalLiq)}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="text-center border-t border-slate-200 pt-6">
+            <p className="text-xs font-semibold text-slate-800">Preparato per: {config.profile.name || 'Utente'}</p>
+            <p className="text-[10px] text-slate-500 mt-1">Generato il: {new Date().toLocaleDateString('it-IT', { year: 'numeric', month: 'long', day: 'numeric' })}</p>
+            <div className="mt-6 bg-slate-50 border border-slate-200 rounded-lg p-3 max-w-sm mx-auto text-[9px] text-slate-500 tracking-wider uppercase font-semibold">
+              ⚠️ Strettamente Riservato & Confidenziale
+            </div>
+          </div>
+        </div>
+
+        {/* PAGINA 2: EXECUTIVE SUMMARY & ASSET ALLOCATION */}
+        <div className="h-[280mm] py-8 flex flex-col justify-between" style={{ pageBreakAfter: 'always' }}>
+          <div>
+            <div className="flex items-center justify-between border-b-2 border-slate-200 pb-3 mb-6">
+              <h2 className="text-lg font-bold uppercase tracking-wider text-slate-800">1. Executive Summary & Allocazione</h2>
+              <span className="text-xs text-slate-400">Wealth Report · Pagina 2</span>
+            </div>
+            
+            <div className="grid grid-cols-2 gap-4 mb-6">
+              <div>
+                <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Composizione Patrimonio</h3>
+                <div className="space-y-2.5">
+                  {compositionData?.pie.map(item => (
+                    <div key={item.name} className="flex items-center justify-between text-xs p-2.5 bg-slate-50 rounded-lg border border-slate-100">
+                      <div className="flex items-center gap-2">
+                        <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: item.color }} />
+                        <span className="font-semibold text-slate-700">{item.name}</span>
+                      </div>
+                      <span className="font-bold text-slate-900 tabular-nums">{fmt(item.value)} ({item.pct.toFixed(1)}%)</span>
+                    </div>
+                  ))}
+                  {contoDepositoData && contoDepositoData.amount > 0 && (
+                    <div className="p-2.5 bg-amber-50/50 rounded-lg border border-amber-100 text-xs">
+                      <div className="flex justify-between font-semibold text-amber-800 mb-1">
+                        <span>di cui in Conto Deposito (1.5%):</span>
+                        <span>{fmt(contoDepositoData.amount)}</span>
+                      </div>
+                      <p className="text-[10px] text-amber-600">Rendimento netto stimato: {fmt2(contoDepositoData.netInterest)}/anno</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+              
+              <div>
+                <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">Performance & Efficienza</h3>
+                {performanceData ? (
+                  <div className="grid grid-cols-2 gap-2.5 text-xs text-center">
+                    <div className="bg-slate-50 rounded-lg p-2.5 border border-slate-100">
+                      <span className="text-[9px] text-slate-500 font-bold block">Rendimento Totale</span>
+                      <span className="font-bold text-emerald-600 mt-1 block">{performanceData.totalReturn.toFixed(2)}%</span>
+                    </div>
+                    <div className="bg-slate-50 rounded-lg p-2.5 border border-slate-100">
+                      <span className="text-[9px] text-slate-500 font-bold block">CAGR Annuo</span>
+                      <span className="font-bold text-emerald-600 mt-1 block">{performanceData.cagr.toFixed(2)}%</span>
+                    </div>
+                    <div className="bg-slate-50 rounded-lg p-2.5 border border-slate-100">
+                      <span className="text-[9px] text-slate-500 font-bold block">Performance YTD</span>
+                      <span className="font-bold text-blue-600 mt-1 block">{performanceData.ytd.toFixed(2)}%</span>
+                    </div>
+                    <div className="bg-slate-50 rounded-lg p-2.5 border border-slate-100">
+                      <span className="text-[9px] text-slate-500 font-bold block">Costo TER Annuo</span>
+                      <span className="font-bold text-rose-600 mt-1 block">{fmt(performanceData.annualTerCost)}</span>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-400 italic">Nessun dato di performance sufficiente.</p>
+                )}
+              </div>
+            </div>
+
+            <div className="mb-6">
+              <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-2.5">Deducibilità Fiscale Fon.Te. (Rigo E27)</h3>
+              {fonteDeducibility ? (
+                <div className="bg-slate-50 rounded-xl p-4 border border-slate-200 grid grid-cols-3 gap-4 text-xs">
+                  <div>
+                    <span className="text-[9px] font-bold text-slate-500 block uppercase">RAL dichiarata</span>
+                    <span className="font-bold text-slate-800 block mt-1">{fmt(fonteDeducibility.ral)}</span>
+                  </div>
+                  <div>
+                    <span className="text-[9px] font-bold text-slate-500 block uppercase">Aliquota marginale</span>
+                    <span className="font-bold text-emerald-600 block mt-1">{fonteDeducibility.marginalRate}%</span>
+                  </div>
+                  <div>
+                    <span className="text-[9px] font-bold text-slate-500 block uppercase">Risparmio d'imposta</span>
+                    <span className="font-extrabold text-blue-600 block mt-1">{fmt(fonteDeducibility.taxSaving)}</span>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-xs text-slate-400 italic">Nessun dato di deducibilità disponibile.</p>
+              )}
+            </div>
+          </div>
+
+          <div className="border-t border-slate-100 pt-4 text-[10px] text-slate-400 text-center">
+            Analisi Patrimoniale Privata Generata Nativamente · Finance Personal Dashboard
+          </div>
+        </div>
+
+        {/* PAGINA 3: STRATEGIA FIRE & PIANIFICAZIONE */}
+        <div className="h-[280mm] py-8 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between border-b-2 border-slate-200 pb-3 mb-6">
+              <h2 className="text-lg font-bold uppercase tracking-wider text-slate-800">2. Strategia FIRE & Roadmap</h2>
+              <span className="text-xs text-slate-400">Wealth Report · Pagina 3</span>
+            </div>
+
+            <div className="mb-6">
+              <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-3">Obiettivo Indipendenza Finanziaria (FIRE)</h3>
+              {fireProgress ? (
+                <div className="bg-slate-50 rounded-xl p-4 border border-slate-200 grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
+                  <div>
+                    <span className="text-[9px] font-bold text-slate-500 block uppercase">FIRE Number Target</span>
+                    <span className="font-bold text-slate-800 block mt-1">{fmt(fireProgress.fireNum)}</span>
+                  </div>
+                  <div>
+                    <span className="text-[9px] font-bold text-slate-500 block uppercase">Progresso attuale</span>
+                    <span className="font-bold text-orange-600 block mt-1">{fireProgress.progress.toFixed(1)}%</span>
+                  </div>
+                  <div>
+                    <span className="text-[9px] font-bold text-slate-500 block uppercase">Mesi stimati al target</span>
+                    <span className="font-bold text-slate-800 block mt-1">{fireProgress.months} mesi</span>
+                  </div>
+                  <div>
+                    <span className="text-[9px] font-bold text-slate-500 block uppercase">Quota Coast FIRE Target</span>
+                    <span className="font-bold text-indigo-600 block mt-1">{fmt(fireProgress.coastFire)} ({fireProgress.coastProgress.toFixed(1)}%)</span>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-xs text-slate-400 italic">Pianificazione FIRE non configurata.</p>
+              )}
+            </div>
+
+            <div>
+              <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-3">Roadmap & Milestone Chiave</h3>
+              <div className="space-y-2">
+                {MILESTONES.slice(0, 5).map((ms, i) => {
+                  const reached = state.etfValue >= ms.pacT;
+                  return (
+                    <div key={i} className={`flex items-center justify-between text-xs p-3 rounded-xl border ${reached ? 'bg-emerald-50/30 border-emerald-200' : 'bg-white border-slate-200'}`}>
+                      <div>
+                        <span className="font-bold text-slate-800">{ms.label}</span>
+                        <p className="text-[10px] text-slate-500 mt-0.5">Anno {ms.year} · Età {ms.age}a · {ms.note}</p>
+                      </div>
+                      <div className="text-right">
+                        <span className="font-bold text-slate-800 tabular-nums">{fmtK(ms.pacT)}</span>
+                        <p className="text-[9px] text-slate-400 mt-0.5">{reached ? '✓ RAGGIUNTO' : 'IN ACCUMULO'}</p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          <div className="border-t border-slate-100 pt-4 text-[10px] text-slate-400 text-center">
+            Documento privato riservato. I dati non costituiscono sollecitazione all'investimento.
+          </div>
+        </div>
+
+      </div>
     </div>
   );
 }

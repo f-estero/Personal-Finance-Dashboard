@@ -114,3 +114,45 @@
 body {
   transition: background-color 0.3s ease, color 0.3s ease;
 }
+
+/* ═══════════════════════════════════════════════════════════
+   PRINT STYLES (@media print)
+   Hides all application UI and exposes the premium PDF report
+   ═══════════════════════════════════════════════════════════ */
+
+@media print {
+  body {
+    background-color: white !important;
+    color: black !important;
+  }
+  
+  /* Nascondi l'intera applicazione eccetto il print container */
+  body > div:not(.print-container),
+  body > #root > div:not(.print-container),
+  header, main, footer, nav, .fixed {
+    display: none !important;
+  }
+
+  .print-container {
+    display: block !important;
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    background: white !important;
+  }
+
+  /* Rimuove intestazioni e piè di pagina del browser (data, url, ecc) */
+  @page {
+    size: A4;
+    margin: 0;
+  }
+
+  /* Forza i colori degli sfondi per evitare stampe sbiadite */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}
