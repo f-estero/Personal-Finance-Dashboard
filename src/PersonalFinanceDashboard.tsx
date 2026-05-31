@@ -737,12 +737,40 @@ export default function PersonalFinanceDashboard() {
     const reader = new FileReader();
     reader.onload = (ev) => {
       try {
-        const d = JSON.parse(ev.target.result);
+        const d = JSON.parse(ev.target.result as string);
+        
+        // Schema Validation
+        if (!d || typeof d !== 'object') {
+          throw new Error('Formato backup non valido: deve essere un oggetto JSON.');
+        }
+        
+        if (d.config) {
+          if (typeof d.config !== 'object') throw new Error('Sezione "config" non valida.');
+          if (d.config.pac && typeof d.config.pac !== 'object') throw new Error('Sezione "config.pac" non valida.');
+          if (d.config.pac?.instruments && !Array.isArray(d.config.pac.instruments)) {
+            throw new Error('La lista "instruments" nel PAC deve essere un array.');
+          }
+          if (d.config.profile && typeof d.config.profile !== 'object') throw new Error('Profilo non valido.');
+          if (d.config.expenses && typeof d.config.expenses !== 'object') throw new Error('Sezione "expenses" non valida.');
+          if (d.config.waterfallLevels && !Array.isArray(d.config.waterfallLevels)) {
+            throw new Error('I livelli waterfall devono essere forniti come array.');
+          }
+        }
+        
+        if (d.state) {
+          if (typeof d.state !== 'object') throw new Error('Sezione "state" non valida.');
+          if (d.state.waterfallCurrent && typeof d.state.waterfallCurrent !== 'object') throw new Error('Stato liquidità non valido.');
+          if (d.state.snapshots && !Array.isArray(d.state.snapshots)) throw new Error('Lo storico degli snapshot deve essere un array.');
+          if (d.state.transactions && !Array.isArray(d.state.transactions)) throw new Error('L\'elenco delle transazioni deve essere un array.');
+          if (d.state.reviews && !Array.isArray(d.state.reviews)) throw new Error('La lista dei bilanci annuali deve essere un array.');
+        }
+
         if (d.config) setConfig({ ...DEFAULT_CONFIG, ...d.config });
         if (d.state) setState({ ...DEFAULT_STATE, ...d.state });
         setToast({ message: 'Dati importati con successo', type: 'success' });
-      } catch (err) {
-        setToast({ message: 'File JSON non valido', type: 'error' });
+      } catch (err: any) {
+        console.error('Import error:', err);
+        setToast({ message: err.message || 'File JSON non valido', type: 'error' });
       }
     };
     reader.readAsText(file);

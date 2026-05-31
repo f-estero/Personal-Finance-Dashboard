@@ -1,7 +1,14 @@
 import { createClient } from '@supabase/supabase-js'
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string
+const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL as string) || ''
+const supabaseAnonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY as string) || ''
+
+if (!supabaseUrl || !supabaseAnonKey) {
+  console.warn(
+    'ATTENZIONE: Variabili d\'ambiente di Supabase (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY) mancanti! ' +
+    'Configura il file .env per abilitare la sincronizzazione cloud.'
+  )
+}
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey)
 

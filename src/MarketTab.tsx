@@ -111,7 +111,7 @@ export default function MarketTab({ config }: Props) {
           </div>
           <p className="text-sm font-medium text-slate-700 mb-1">Nessun ticker configurato</p>
           <p className="text-xs text-slate-500 max-w-sm mx-auto">
-            Vai in <strong>Impostazioni → PAC</strong> e aggiungi il ticker di borsa per ogni ETF (es. <span className="font-mono bg-slate-100 px-1 rounded">VUSA.LON</span>, <span className="font-mono bg-slate-100 px-1 rounded">VOO</span>)
+            Vai in <strong>Impostazioni → PAC</strong> e aggiungi il ticker di borsa per ogni ETF (es. <span className="font-mono bg-slate-100 px-1 rounded">VUSA.L</span> per Londra, <span className="font-mono bg-slate-100 px-1 rounded">VUSA.MI</span> per Milano o <span className="font-mono bg-slate-100 px-1 rounded">VOO</span>)
           </p>
         </div>
       )}
