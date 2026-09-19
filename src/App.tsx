@@ -1,12 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import { supabase, storage } from './supabase'
+import { supabase } from './supabase'
 import type { Session } from '@supabase/supabase-js'
 import PersonalFinanceDashboard from './PersonalFinanceDashboard'
 import PrivacyPolicy from './PrivacyPolicy'
 import { makeT, detectBrowserLang, type TFunc } from './i18n'
 import { Wallet, Lock, Mail, Loader2, Eye, EyeOff, UserPlus, ArrowLeft, CheckCircle2 } from 'lucide-react'
-
-;(window as any).storage = storage
 
 type Screen = 'login' | 'signup' | 'forgot' | 'reset' | 'check-email'
 

@@ -12,3 +12,5 @@ diff-utf8.txt
 # Local tooling / deploy state
 .vercel
 edge-profile
+.claude
+.vscode
