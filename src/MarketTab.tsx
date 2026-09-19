@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { TrendingUp, TrendingDown, RefreshCw, AlertCircle, ExternalLink, Info } from 'lucide-react'
+import { makeT, type TFunc } from './i18n'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface Quote {
@@ -101,6 +102,8 @@ function Sparkline({ data, isPositive }: { data?: number[]; isPositive?: boolean
 
 // ─── Main Component ──────────────────────────────────────────────────────────
 export default function MarketTab({ config }: Props) {
+  const t = useMemo(() => makeT(config.language || 'en'), [config.language])
+
   const [quotes, setQuotes] = useState<Record<string, Quote>>({})
   const [errors, setErrors] = useState<Record<string, string>>({})
   
@@ -193,9 +196,9 @@ export default function MarketTab({ config }: Props) {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-base font-semibold text-slate-900">Mercati Finanziari</h2>
+          <h2 className="text-base font-semibold text-slate-900">{t('Mercati Finanziari')}</h2>
           <p className="text-xs text-slate-500">
-            {lastFetch ? `Aggiornato alle ${lastFetch}` : 'Caricamento dati di mercato...'}
+            {lastFetch ? t('Aggiornato alle {time}', { time: lastFetch }) : t('Caricamento dati di mercato...')}
           </p>
         </div>
         <button
@@ -204,7 +207,7 @@ export default function MarketTab({ config }: Props) {
           className="inline-flex items-center gap-2 px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50 transition-colors shadow-sm"
         >
           <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-          {loading ? 'Aggiornamento...' : 'Aggiorna'}
+          {loading ? t('Aggiornamento...') : t('Aggiorna')}
         </button>
       </div>
 
@@ -221,7 +224,7 @@ export default function MarketTab({ config }: Props) {
               <div className="min-w-0">
                 <div className="flex items-center gap-1.5">
                   <span className="text-sm flex-shrink-0">{market.icon}</span>
-                  <span className="text-xs font-semibold text-slate-700 truncate">{market.name}</span>
+                  <span className="text-xs font-semibold text-slate-700 truncate">{t(market.name)}</span>
                 </div>
                 <span className="text-[9px] text-slate-400 font-mono tracking-wider block mt-0.5">{market.ticker}</span>
               </div>
@@ -232,7 +235,7 @@ export default function MarketTab({ config }: Props) {
                   {loading && !q && !err ? (
                     <div className="h-5 w-16 bg-slate-100 rounded animate-pulse" />
                   ) : err ? (
-                    <span className="text-[10px] text-slate-400 font-mono">N/D</span>
+                    <span className="text-[10px] text-slate-400 font-mono">{t('N/D')}</span>
                   ) : q ? (
                     <span className="text-sm font-bold text-slate-900 tabular-nums block truncate">
                       {fmt2(q.price)}
@@ -264,10 +267,10 @@ export default function MarketTab({ config }: Props) {
       <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
         <div className="px-5 pt-5 pb-3 border-b border-slate-100 flex items-center justify-between">
           <div>
-            <h3 className="text-sm font-semibold text-slate-900">I tuoi ETF e Fondi in Portafoglio</h3>
-            <p className="text-xs text-slate-500 mt-0.5">Andamento dei tuoi asset principali</p>
+            <h3 className="text-sm font-semibold text-slate-900">{t('I tuoi ETF e Fondi in Portafoglio')}</h3>
+            <p className="text-xs text-slate-500 mt-0.5">{t('Andamento dei tuoi asset principali')}</p>
           </div>
-          <Badge valuta="EUR" />
+          <Badge valuta="EUR" t={t} />
         </div>
 
         {tickeredInstruments.length === 0 ? (
@@ -275,9 +278,9 @@ export default function MarketTab({ config }: Props) {
             <div className="inline-flex p-3 bg-amber-50 rounded-full mb-3">
               <AlertCircle size={24} className="text-amber-500" />
             </div>
-            <p className="text-sm font-medium text-slate-700 mb-1">Nessun ticker configurato</p>
+            <p className="text-sm font-medium text-slate-700 mb-1">{t('Nessun ticker configurato')}</p>
             <p className="text-xs text-slate-500 max-w-sm mx-auto">
-              Vai in <strong>Impostazioni → PAC</strong> e aggiungi il ticker di borsa per ogni ETF (es. <span className="font-mono bg-slate-100 px-1 rounded">VUSA.L</span> per Londra, <span className="font-mono bg-slate-100 px-1 rounded">VUSA.MI</span> per Milano o <span className="font-mono bg-slate-100 px-1 rounded">VOO</span>)
+              {t('Vai in')} <strong>{t('Impostazioni → PAC')}</strong> {t('e aggiungi il ticker di borsa per ogni ETF. Esempi:')} <span className="font-mono bg-slate-100 px-1 rounded">VUSA.L</span> ({t('Londra')}), <span className="font-mono bg-slate-100 px-1 rounded">VUSA.MI</span> ({t('Milano')}), <span className="font-mono bg-slate-100 px-1 rounded">VOO</span>.
             </p>
           </div>
         ) : (
@@ -285,12 +288,12 @@ export default function MarketTab({ config }: Props) {
             <table className="w-full border-collapse text-left text-sm">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-100 text-slate-500 text-xs font-semibold uppercase tracking-wider">
-                  <th className="px-6 py-3">ETF / Fondo</th>
-                  <th className="px-6 py-3 text-right">Prezzo</th>
-                  <th className="px-6 py-3 text-center">Variazione 24h</th>
-                  <th className="px-6 py-3 text-center">Trend (30g)</th>
-                  <th className="px-6 py-3 text-right hidden sm:table-cell">Precedente</th>
-                  <th className="px-6 py-3 text-right hidden md:table-cell">Range Giorno</th>
+                  <th className="px-6 py-3">{t('ETF / Fondo')}</th>
+                  <th className="px-6 py-3 text-right">{t('Prezzo')}</th>
+                  <th className="px-6 py-3 text-center">{t('Variazione 24h')}</th>
+                  <th className="px-6 py-3 text-center">{t('Trend (30g)')}</th>
+                  <th className="px-6 py-3 text-right hidden sm:table-cell">{t('Precedente')}</th>
+                  <th className="px-6 py-3 text-right hidden md:table-cell">{t('Range Giorno')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -315,10 +318,10 @@ export default function MarketTab({ config }: Props) {
                       {/* Prezzo attuale */}
                       <td className="px-6 py-4 text-right font-semibold tabular-nums text-slate-900">
                         {loading && !q && !err ? (
-                          <span className="text-slate-300 animate-pulse">Caricamento...</span>
+                          <span className="text-slate-300 animate-pulse">{t('Caricamento...')}</span>
                         ) : err ? (
                           <span className="text-rose-600 text-xs flex items-center justify-end gap-1">
-                            <AlertCircle size={12} /> N/D
+                            <AlertCircle size={12} /> {t('N/D')}
                           </span>
                         ) : q ? (
                           <span>{fmt2(q.price)}</span>
@@ -376,7 +379,7 @@ export default function MarketTab({ config }: Props) {
 
         {lastFetch && (
           <div className="px-5 py-3 bg-slate-50 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400">
-            <span>Dati forniti in differita via Yahoo Finance</span>
+            <span>{t('Dati forniti in differita via Yahoo Finance')}</span>
             <a
               href="https://finance.yahoo.com"
               target="_blank"
@@ -393,8 +396,8 @@ export default function MarketTab({ config }: Props) {
       <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 flex items-start gap-2.5 shadow-sm">
         <Info size={16} className="text-emerald-600 flex-shrink-0 mt-0.5" />
         <div className="text-xs text-emerald-900 leading-relaxed">
-          <strong>Dashboard dei Mercati integrata:</strong> Tutte le informazioni finanziarie (Indici, Criptovalute e Materie Prime) sono recuperate in tempo reale. I dati storici tracciati negli sparkline mostrano l'andamento grafico degli ultimi 30 giorni di borsa. 
-          <span className="block mt-1 text-emerald-700 font-medium">Nota: I prezzi degli indici globali come S&P 500 sono espressi nella valuta di origine (USD), mentre Bitcoin ed Ethereum sono espressi in Euro (€).</span>
+          <strong>{t('Dashboard dei Mercati integrata:')}</strong> {t('Tutte le informazioni finanziarie (Indici, Criptovalute e Materie Prime) sono recuperate in tempo reale. I dati storici tracciati negli sparkline mostrano l\'andamento grafico degli ultimi 30 giorni di borsa.')}
+          <span className="block mt-1 text-emerald-700 font-medium">{t('Nota: I prezzi degli indici globali come S&P 500 sono espressi nella valuta di origine (USD), mentre Bitcoin ed Ethereum sono espressi in Euro (€).')}</span>
         </div>
       </div>
     </div>
@@ -402,10 +405,10 @@ export default function MarketTab({ config }: Props) {
 }
 
 // Piccolo componente di supporto Badge
-function Badge({ valuta }: { valuta: string }) {
+function Badge({ valuta, t }: { valuta: string; t: TFunc }) {
   return (
     <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
-      Valuta: {valuta}
+      {t('Valuta: {valuta}', { valuta })}
     </span>
   )
 }

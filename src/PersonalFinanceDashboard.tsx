@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import * as XLSX from 'xlsx';
 import { supabase, storage } from './supabase';
 import MarketTab from './MarketTab';
+import { type Lang, type TFunc, LANGUAGES, isLang, makeT, monthName, monthShort } from './i18n';
 import {
   LineChart, Line, AreaChart, Area, PieChart, Pie, Cell,
   XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend, BarChart, Bar
@@ -107,6 +108,8 @@ export interface Config {
   contoDepositoAmount: number;
   contoDepositoRate: number;
   expectedInflationRate: number;
+  language: Lang;
+  modules: { tax: boolean; pension: boolean; fire: boolean };
 }
 
 export interface DashboardState {
@@ -180,6 +183,8 @@ const DEFAULT_CONFIG = {
   contoDepositoAmount: 0,
   contoDepositoRate: 1.5,
   expectedInflationRate: 2.0,
+  language: 'en' as Lang,
+  modules: { tax: true, pension: true, fire: true },
 };
 
 const DEFAULT_STATE = {
@@ -290,18 +295,18 @@ function sanitizeObject(obj: any): any {
 }
 
 const ageFromYear = (by) => new Date().getFullYear() - by;
-const formatRelativeTime = (iso) => {
+const formatRelativeTime = (iso, t: TFunc) => {
   if (!iso) return null;
   const then = new Date(iso);
   const now = new Date();
   const diffMs = now.getTime() - then.getTime();
   const days = Math.floor(diffMs / 86400000);
-  if (days < 1) return 'oggi';
-  if (days === 1) return 'ieri';
-  if (days < 7) return `${days} giorni fa`;
-  if (days < 30) return `${Math.floor(days / 7)} settimane fa`;
-  if (days < 365) return `${Math.floor(days / 30)} mesi fa`;
-  return `${Math.floor(days / 365)} anni fa`;
+  if (days < 1) return t('oggi');
+  if (days === 1) return t('ieri');
+  if (days < 7) return t('{n} giorni fa', { n: days });
+  if (days < 30) return t('{n} settimane fa', { n: Math.floor(days / 7) });
+  if (days < 365) return t('{n} mesi fa', { n: Math.floor(days / 30) });
+  return t('{n} anni fa', { n: Math.floor(days / 365) });
 };
 const isStale = (iso, days = 90) => {
   if (!iso) return true;
@@ -579,9 +584,10 @@ interface ConfirmDialogProps {
   onConfirm: () => void;
   onCancel: () => void;
   variant?: 'danger' | 'primary';
+  t: TFunc;
 }
 
-function ConfirmDialog({ open, title, message, onConfirm, onCancel, variant = 'danger' }: ConfirmDialogProps) {
+function ConfirmDialog({ open, title, message, onConfirm, onCancel, variant = 'danger', t }: ConfirmDialogProps) {
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
@@ -589,8 +595,8 @@ function ConfirmDialog({ open, title, message, onConfirm, onCancel, variant = 'd
         <h3 className="text-base font-semibold text-slate-900 mb-2">{title}</h3>
         <p className="text-sm text-slate-600 mb-5">{message}</p>
         <div className="flex justify-end gap-2">
-          <Button onClick={onCancel} variant="secondary">Annulla</Button>
-          <Button onClick={onConfirm} variant={variant === 'danger' ? 'danger' : 'primary'}>Conferma</Button>
+          <Button onClick={onCancel} variant="secondary">{t('Annulla')}</Button>
+          <Button onClick={onConfirm} variant={variant === 'danger' ? 'danger' : 'primary'}>{t('Conferma')}</Button>
         </div>
       </div>
     </div>
@@ -606,6 +612,7 @@ export default function PersonalFinanceDashboard() {
   const [config, setConfig] = useState<Config>(DEFAULT_CONFIG as any);
   const [state, setState] = useState<DashboardState>(DEFAULT_STATE as any);
   const [loaded, setLoaded] = useState(false);
+  const t = useMemo(() => makeT(config.language), [config.language]);
   const [toast, setToast] = useState<{ message: string; type?: 'success' | 'error' | 'info' } | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<{ title: string; message: string; onConfirm: () => void; onCancel?: () => void; variant?: string } | null>(null);
   const [editWaterfall, setEditWaterfall] = useState(false);
@@ -695,6 +702,14 @@ export default function PersonalFinanceDashboard() {
               contoDepositoAmount: safeNum(rawC.contoDepositoAmount, DEFAULT_CONFIG.contoDepositoAmount),
               contoDepositoRate: safeNum(rawC.contoDepositoRate, DEFAULT_CONFIG.contoDepositoRate),
               expectedInflationRate: safeNum(rawC.expectedInflationRate !== undefined ? rawC.expectedInflationRate : DEFAULT_CONFIG.expectedInflationRate, 2.0),
+              // Chi usa già l'app ha una config priva di questi campi: resta in
+              // italiano con tutti i moduli visibili, così non cambia nulla.
+              language: isLang(rawC.language) ? rawC.language : 'it',
+              modules: {
+                tax: typeof rawC.modules?.tax === 'boolean' ? rawC.modules.tax : true,
+                pension: typeof rawC.modules?.pension === 'boolean' ? rawC.modules.pension : true,
+                fire: typeof rawC.modules?.fire === 'boolean' ? rawC.modules.fire : true,
+              },
             };
 
             // Garanzia assoluta che ogni strumento abbia un ID univoco e proprietà fiscali
@@ -748,7 +763,7 @@ export default function PersonalFinanceDashboard() {
                 if (d.snaps) migrated.snapshots = d.snaps;
                 if (d.fireP) migrated.fireParams = d.fireP;
                 setState(migrated);
-                setToast({ message: `Dati migrati da ${lk}`, type: 'info' });
+                setToast({ message: t('Dati migrati da {source}', { source: lk }), type: 'info' });
                 break;
               }
             } catch {}
@@ -814,7 +829,7 @@ export default function PersonalFinanceDashboard() {
     }));
     updateState({ fireParams: { rate, fonteRate: rate - 2 > 0 ? rate - 2 : 2, retireAge } });
     setShowOnboarding(false);
-    setToast({ message: `Benvenuto ${obName.trim()}! Completa la configurazione nelle Impostazioni.`, type: 'success' });
+    setToast({ message: t('Benvenuto {name}! Completa la configurazione nelle Impostazioni.', { name: obName.trim() }), type: 'success' });
   };
 
   const applyFireWizard = () => {
@@ -822,7 +837,7 @@ export default function PersonalFinanceDashboard() {
     const rate = parseFloat(obReturnRate) || 5.0;
     updateState({ fireParams: { rate, fonteRate: rate - 2 > 0 ? rate - 2 : 2, retireAge } });
     setShowFireWizard(false);
-    setToast({ message: 'Obiettivo FIRE aggiornato', type: 'success' });
+    setToast({ message: t('Obiettivo FIRE aggiornato'), type: 'success' });
   };
 
   const addGoal = () => {
@@ -841,12 +856,12 @@ export default function PersonalFinanceDashboard() {
     updateConfig({ goals: [...(config.goals || []), newG] });
     setNewGoal({ title: '', targetAmount: '', currentAmount: '', deadline: '', color: '#3b82f6' });
     setShowAddGoal(false);
-    setToast({ message: 'Obiettivo aggiunto', type: 'success' });
+    setToast({ message: t('Obiettivo aggiunto'), type: 'success' });
   };
 
   const deleteGoal = (id) => {
     updateConfig({ goals: (config.goals || []).filter(g => g.id !== id) });
-    setToast({ message: 'Obiettivo rimosso', type: 'info' });
+    setToast({ message: t('Obiettivo rimosso'), type: 'info' });
   };
 
   // ─── ETF PAC Helpers ───
@@ -864,7 +879,7 @@ export default function PersonalFinanceDashboard() {
       isin: ''
     };
     updateConfig({ pac: { ...config.pac, instruments: [...(config.pac.instruments || []), newIns] } });
-    setToast({ message: 'Strumento aggiunto al PAC', type: 'success' });
+    setToast({ message: t('Strumento aggiunto al PAC'), type: 'success' });
   };
 
   const deleteInstrument = (id: string) => {
@@ -873,7 +888,7 @@ export default function PersonalFinanceDashboard() {
     const newVals = { ...state.instrumentValues };
     delete newVals[id];
     updateState({ instrumentValues: newVals });
-    setToast({ message: 'Strumento rimosso dal PAC', type: 'info' });
+    setToast({ message: t('Strumento rimosso dal PAC'), type: 'info' });
   };
 
   // ─── Spese Fisse Helpers ───
@@ -890,14 +905,14 @@ export default function PersonalFinanceDashboard() {
         [newKey]: newExp
       }
     });
-    setToast({ message: 'Spesa fissa aggiunta', type: 'success' });
+    setToast({ message: t('Spesa fissa aggiunta'), type: 'success' });
   };
 
   const deleteFixedExpense = (key: string) => {
     const newExpenses = { ...config.expenses };
     delete newExpenses[key];
     updateConfig({ expenses: newExpenses });
-    setToast({ message: 'Spesa fissa rimossa', type: 'info' });
+    setToast({ message: t('Spesa fissa rimossa'), type: 'info' });
   };
 
   // ─── Spese Variabili Helpers ───
@@ -913,14 +928,14 @@ export default function PersonalFinanceDashboard() {
         [newKey]: newVar
       }
     });
-    setToast({ message: 'Spesa variabile aggiunta', type: 'success' });
+    setToast({ message: t('Spesa variabile aggiunta'), type: 'success' });
   };
 
   const deleteVariableExpense = (key: string) => {
     const newVars = { ...config.variableExpenses };
     delete newVars[key];
     updateConfig({ variableExpenses: newVars });
-    setToast({ message: 'Spesa variabile rimossa', type: 'info' });
+    setToast({ message: t('Spesa variabile rimossa'), type: 'info' });
   };
 
   // ─── Waterfall Levels Helpers ───
@@ -930,8 +945,8 @@ export default function PersonalFinanceDashboard() {
     const availableColor = HSL_COLORS.find(c => !existingColors.includes(c)) || HSL_COLORS[(config.waterfallLevels || []).length % HSL_COLORS.length];
     const newLv = {
       id: generateId('lv_'),
-      name: `Fondo Personalizzato ${(config.waterfallLevels || []).length + 1}`,
-      desc: 'Scopo del fondo',
+      name: t('Fondo Personalizzato {n}', { n: (config.waterfallLevels || []).length + 1 }),
+      desc: t('Scopo del fondo'),
       cap: 1000,
       color: availableColor,
       icon: 'coffee'
@@ -956,13 +971,13 @@ export default function PersonalFinanceDashboard() {
     }));
 
     updateConfig({ waterfallLevels: newLevels });
-    setToast({ message: 'Buffer aggiunto al waterfall', type: 'success' });
+    setToast({ message: t('Buffer aggiunto al waterfall'), type: 'success' });
   };
 
   const deleteWaterfallLevel = (id: string) => {
     const currentLevels = (config.waterfallLevels || []).filter((l: any) => l.id !== id);
     if (currentLevels.length === 0) {
-      setToast({ message: 'Deve rimanere almeno un livello nel waterfall', type: 'error' });
+      setToast({ message: t('Deve rimanere almeno un livello nel waterfall'), type: 'error' });
       return;
     }
     const newLevels = currentLevels.map((l, idx) => ({
@@ -975,7 +990,7 @@ export default function PersonalFinanceDashboard() {
     delete newWfCurrent[id];
     updateState({ waterfallCurrent: newWfCurrent });
 
-    setToast({ message: 'Buffer rimosso dal waterfall', type: 'info' });
+    setToast({ message: t('Buffer rimosso dal waterfall'), type: 'info' });
   };
 
   // ─── Custom Milestones Helpers ───
@@ -983,7 +998,7 @@ export default function PersonalFinanceDashboard() {
     if (!newMsLabel.trim() || !newMsAmount) return;
     const amount = safeNum(newMsAmount);
     if (amount <= 0) {
-      setToast({ message: 'Importo target non valido', type: 'error' });
+      setToast({ message: t('Importo target non valido'), type: 'error' });
       return;
     }
     const newMs = {
@@ -994,12 +1009,12 @@ export default function PersonalFinanceDashboard() {
     updateConfig({ customMilestones: [...(config.customMilestones || []), newMs] });
     setNewMsLabel('');
     setNewMsAmount('');
-    setToast({ message: 'Milestone personalizzata aggiunta', type: 'success' });
+    setToast({ message: t('Milestone personalizzata aggiunta'), type: 'success' });
   };
 
   const deleteCustomMilestone = (id: string) => {
     updateConfig({ customMilestones: (config.customMilestones || []).filter((m: any) => m.id !== id) });
-    setToast({ message: 'Milestone personalizzata rimossa', type: 'info' });
+    setToast({ message: t('Milestone personalizzata rimossa'), type: 'info' });
   };
 
   const addFonteContribution = () => {
@@ -1031,13 +1046,13 @@ export default function PersonalFinanceDashboard() {
     
     setNewContrib({ year: cy, quarter: 1, aderente: '', azienda: '', tfr: '', volontario: '', welfare: '' });
     setShowAddContrib(false);
-    setToast({ message: 'Contributo registrato', type: 'success' });
+    setToast({ message: t('Contributo registrato'), type: 'success' });
   };
 
   const deleteFonteContribution = (id) => {
     const contributions = (config.fonte?.contributions || []).filter(c => c.id !== id && `${c.year}-${c.quarter}` !== id);
     updateConfig({ fonte: { ...config.fonte, contributions } });
-    setToast({ message: 'Contributo rimosso', type: 'info' });
+    setToast({ message: t('Contributo rimosso'), type: 'info' });
   };
 
   const importFonteExcel = (file: File) => {
@@ -1051,7 +1066,7 @@ export default function PersonalFinanceDashboard() {
         const json = XLSX.utils.sheet_to_json(ws) as any[];
 
         if (!json || json.length === 0) {
-          setToast({ message: 'Il file Excel sembra vuoto', type: 'info' });
+          setToast({ message: t('Il file Excel sembra vuoto'), type: 'info' });
           return;
         }
 
@@ -1087,7 +1102,7 @@ export default function PersonalFinanceDashboard() {
         const hasPeriodo = getRowValue(firstRow, 'Periodo', 'periodo', 'quarter') !== null;
         
         if (!hasAnno || !hasPeriodo) {
-          setToast({ message: 'Struttura file non riconosciuta. Assicurati che contenga le colonne "Anno" e "Periodo".', type: 'error' });
+          setToast({ message: t('Struttura file non riconosciuta. Assicurati che contenga le colonne "Anno" e "Periodo".'), type: 'error' });
           return;
         }
 
@@ -1139,10 +1154,10 @@ export default function PersonalFinanceDashboard() {
         });
 
         updateConfig({ fonte: { ...config.fonte, contributions: currentContribs } });
-        setToast({ message: `Importati con successo ${importCount} contributi ${config.fonte.name || 'Fondo Pensione'}!`, type: 'success' });
+        setToast({ message: t('Importati con successo {count} contributi {fund}!', { count: importCount, fund: config.fonte.name || 'Fondo Pensione' }), type: 'success' });
       } catch (err) {
         console.error(err);
-        setToast({ message: 'Errore durante la lettura del file Excel', type: 'error' });
+        setToast({ message: t('Errore durante la lettura del file Excel'), type: 'error' });
       }
     };
     reader.readAsArrayBuffer(file);
@@ -1158,7 +1173,7 @@ export default function PersonalFinanceDashboard() {
 
   useEffect(() => {
     if (!loaded) return;
-    const t = setTimeout(async () => {
+    const timer = setTimeout(async () => {
       try {
         setSyncStatus('saving');
         await storage.set(STORAGE_KEY, JSON.stringify({ version: APP_VERSION, schemaVersion: SCHEMA_VERSION, config, state }));
@@ -1167,29 +1182,29 @@ export default function PersonalFinanceDashboard() {
         setTimeout(() => setSyncStatus('idle'), 2000);
       } catch (err) {
         setSyncStatus('error');
-        setToast({ message: 'Errore salvataggio cloud', type: 'error' });
+        setToast({ message: t('Errore salvataggio cloud'), type: 'error' });
       }
     }, 600);
-    return () => clearTimeout(t);
+    return () => clearTimeout(timer);
   }, [config, state, loaded]);
 
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       if (isDirtyRef.current || syncStatus === 'saving') {
         e.preventDefault();
-        e.returnValue = 'Ci sono modifiche non salvate. Sei sicuro di voler uscire?';
-        return 'Ci sono modifiche non salvate. Sei sicuro di voler uscire?';
+        e.returnValue = t('Ci sono modifiche non salvate. Sei sicuro di voler uscire?');
+        return t('Ci sono modifiche non salvate. Sei sicuro di voler uscire?');
       }
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-  }, [syncStatus]);
+  }, [syncStatus, t]);
 
   // ─── Toast auto-dismiss ───
   useEffect(() => {
     if (toast) {
-      const t = setTimeout(() => setToast(null), 2800);
-      return () => clearTimeout(t);
+      const timer = setTimeout(() => setToast(null), 2800);
+      return () => clearTimeout(timer);
     }
   }, [toast]);
 
@@ -1481,7 +1496,7 @@ export default function PersonalFinanceDashboard() {
 
   const applySalaryConfirm = (eventKey, actualAmount) => {
     const amt = safeNum(actualAmount);
-    if (amt <= 0) { setToast({ message: 'Importo non valido', type: 'error' }); return; }
+    if (amt <= 0) { setToast({ message: t('Importo non valido'), type: 'error' }); return; }
     const { newWf, movements } = distributeToWaterfall(amt, state.waterfallCurrent, config.waterfallLevels);
     const entry = { type: 'salary_in', amount: amt, movements, appliedAt: new Date().toISOString() };
     updateState({
@@ -1501,10 +1516,10 @@ export default function PersonalFinanceDashboard() {
   };
 
   const applyPacConfirm = (eventKey, actualAmount: number, excessAlloc: Record<string, number> = {}) => {
-    if (actualAmount <= 0) { setToast({ message: 'Importo non valido', type: 'error' }); return; }
+    if (actualAmount <= 0) { setToast({ message: t('Importo non valido'), type: 'error' }); return; }
     const { newWf, movements, shortfall } = withdrawFromWaterfall(actualAmount, state.waterfallCurrent, config.waterfallLevels);
     if (shortfall > 0) {
-      setToast({ message: `Liquidità insufficiente per PAC (${fmt(actualAmount)}). Mancano ${fmt(shortfall)}.`, type: 'error' });
+      setToast({ message: t('Liquidità insufficiente per PAC ({amount}). Mancano {missing}.', { amount: fmt(actualAmount), missing: fmt(shortfall) }), type: 'error' });
       return;
     }
     // Aggiorna i valori per-strumento: base proporzionale + eccedenza esplicita
@@ -1534,7 +1549,7 @@ export default function PersonalFinanceDashboard() {
       instrumentValuesUpdatedAt: new Date().toISOString(),
     });
     const excessMsg = excess > 0 ? ` · ${fmt(excess)} extra fuori piano` : '';
-    setToast({ message: `PAC ${fmt(actualAmount)} eseguito · +${fmt(actualAmount)} su ETF${excessMsg}`, type: 'success' });
+    setToast({ message: t('PAC {amount} eseguito · +{amount} su ETF', { amount: fmt(actualAmount) }) + excessMsg, type: 'success' });
     setPacConfirmDialog(null);
   };
 
@@ -1543,14 +1558,14 @@ export default function PersonalFinanceDashboard() {
     const extr = safeNum(extraAmount);
     const totalAmount = sched + extr;
     if (totalAmount <= 0) {
-      setToast({ message: 'Inserisci un importo valido superiore a 0', type: 'error' });
+      setToast({ message: t('Inserisci un importo valido superiore a 0'), type: 'error' });
       return;
     }
 
     const { newWf, movements, shortfall } = withdrawFromWaterfall(totalAmount, state.waterfallCurrent, config.waterfallLevels);
     if (shortfall > 0) {
       setToast({
-        message: `Attenzione: Liquidità insufficiente per registrare tutte le spese (${fmt(totalAmount)}). Mancano ${fmt(shortfall)}. Spese comunque detratte fino a saldo zero.`,
+        message: t('Attenzione: Liquidità insufficiente per registrare tutte le spese ({amount}). Mancano {missing}. Spese comunque detratte fino a saldo zero.', { amount: fmt(totalAmount), missing: fmt(shortfall) }),
         type: 'error'
       });
     }
@@ -1587,7 +1602,7 @@ export default function PersonalFinanceDashboard() {
     });
 
     setToast({
-      message: `Spese del mese registrate con successo! Detratti ${fmt(totalAmount)} dalla liquidità.`,
+      message: t('Spese del mese registrate con successo! Detratti {amount} dalla liquidità.', { amount: fmt(totalAmount) }),
       type: 'success'
     });
     setExpenseConfirmDialog(null);
@@ -1615,7 +1630,7 @@ export default function PersonalFinanceDashboard() {
     delete newLedger[eventKey];
     patch.ledger = newLedger;
     updateState(patch);
-    setToast({ message: 'Operazione annullata e patrimonio ripristinato', type: 'info' });
+    setToast({ message: t('Operazione annullata e patrimonio ripristinato'), type: 'info' });
   };
 
   const handleSalaryClick = (eventKey, expectedAmount) => {
@@ -1641,7 +1656,7 @@ export default function PersonalFinanceDashboard() {
     const snap = { date: k, etf: state.etfValue, fonte: state.fonteValue, liq: totalLiq, nw: netWorth };
     const newSnaps = [...(state.snapshots || []).filter(s => s && s.date && s.date !== k), snap].sort((a, b) => a.date.localeCompare(b.date)).slice(-300);
     updateState({ snapshots: newSnaps });
-    setToast({ message: 'Snapshot salvato', type: 'success' });
+    setToast({ message: t('Snapshot salvato'), type: 'success' });
   };
 
   // Auto-rebalance: sposta eccedenza dai livelli con cap a L4
@@ -1670,15 +1685,15 @@ export default function PersonalFinanceDashboard() {
   // Versamento volontario ETF
   const applyVoluntaryInvestment = () => {
     const amt = safeNum(voluntaryAmount);
-    if (amt <= 0) { setToast({ message: 'Importo non valido', type: 'error' }); return; }
+    if (amt <= 0) { setToast({ message: t('Importo non valido'), type: 'error' }); return; }
     const allocTotal = Object.values(voluntaryAlloc).reduce((s, v) => s + safeNum(v), 0);
     if (Math.abs(allocTotal - amt) > 1) {
-      setToast({ message: `Alloca esattamente ${fmt(amt)} — attuale: ${fmt(allocTotal)}`, type: 'error' });
+      setToast({ message: t('Alloca esattamente {target} — attuale: {current}', { target: fmt(amt), current: fmt(allocTotal) }), type: 'error' });
       return;
     }
     const { newWf, movements, shortfall } = withdrawFromWaterfall(amt, state.waterfallCurrent, config.waterfallLevels);
     if (shortfall > 0) {
-      setToast({ message: `Liquidità insufficiente. Mancano ${fmt(shortfall)}.`, type: 'error' });
+      setToast({ message: t('Liquidità insufficiente. Mancano {missing}.', { missing: fmt(shortfall) }), type: 'error' });
       return;
     }
     const newInstrumentValues = { ...(state.instrumentValues || {}) };
@@ -1698,7 +1713,7 @@ export default function PersonalFinanceDashboard() {
       instrumentValuesUpdatedAt: new Date().toISOString(),
       transactions: [tx, ...state.transactions].slice(0, 2400),
     });
-    setToast({ message: `Versamento volontario ${fmt(amt)} eseguito · +${fmt(amt)} su ETF`, type: 'success' });
+    setToast({ message: t('Versamento volontario {amount} eseguito · +{amount} su ETF', { amount: fmt(amt) }), type: 'success' });
     setVoluntaryAmount('');
     setVoluntaryAlloc({});
     setShowVoluntary(false);
@@ -1706,12 +1721,12 @@ export default function PersonalFinanceDashboard() {
 
   const addTransaction = () => {
     const amt = safeNum(newTx.amount);
-    if (amt <= 0) { setToast({ message: 'Importo non valido', type: 'error' }); return; }
+    if (amt <= 0) { setToast({ message: t('Importo non valido'), type: 'error' }); return; }
     const tx = { id: generateId('tx_'), date: todayKey(), amount: amt, type: newTx.type, category: newTx.category, note: newTx.note };
     updateState({ transactions: [tx, ...state.transactions].slice(0, 2400) });
     setNewTx({ amount: '', type: 'income', category: 'other', note: '' });
     setShowAddTx(false);
-    setToast({ message: 'Transazione aggiunta', type: 'success' });
+    setToast({ message: t('Transazione aggiunta'), type: 'success' });
   };
 
   const deleteTransaction = (id) => updateState({ transactions: state.transactions.filter(t => t.id !== id) });
@@ -1725,7 +1740,7 @@ export default function PersonalFinanceDashboard() {
     a.download = `pfd-backup-${todayKey()}.json`;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     URL.revokeObjectURL(url);
-    setToast({ message: 'Backup esportato', type: 'success' });
+    setToast({ message: t('Backup esportato'), type: 'success' });
   };
 
   const importData = (e) => {
@@ -1735,42 +1750,42 @@ export default function PersonalFinanceDashboard() {
     reader.onload = (ev) => {
       try {
         const resultString = ev.target?.result;
-        if (!resultString) throw new Error('Impossibile leggere il file.');
+        if (!resultString) throw new Error(t('Impossibile leggere il file.'));
         const d = JSON.parse(resultString as string);
         
         // Schema Validation
         if (!d || typeof d !== 'object') {
-          throw new Error('Formato backup non valido: deve essere un oggetto JSON.');
+          throw new Error(t('Formato backup non valido: deve essere un oggetto JSON.'));
         }
         
         if (d.config) {
-          if (typeof d.config !== 'object') throw new Error('Sezione "config" non valida.');
-          if (d.config.pac && typeof d.config.pac !== 'object') throw new Error('Sezione "config.pac" non valida.');
+          if (typeof d.config !== 'object') throw new Error(t('Sezione "config" non valida.'));
+          if (d.config.pac && typeof d.config.pac !== 'object') throw new Error(t('Sezione "config.pac" non valida.'));
           if (d.config.pac?.instruments && !Array.isArray(d.config.pac.instruments)) {
-            throw new Error('La lista "instruments" nel PAC deve essere un array.');
+            throw new Error(t('La lista "instruments" nel PAC deve essere un array.'));
           }
-          if (d.config.profile && typeof d.config.profile !== 'object') throw new Error('Profilo non valido.');
-          if (d.config.expenses && typeof d.config.expenses !== 'object') throw new Error('Sezione "expenses" non valida.');
+          if (d.config.profile && typeof d.config.profile !== 'object') throw new Error(t('Profilo non valido.'));
+          if (d.config.expenses && typeof d.config.expenses !== 'object') throw new Error(t('Sezione "expenses" non valida.'));
           if (d.config.waterfallLevels && !Array.isArray(d.config.waterfallLevels)) {
-            throw new Error('I livelli waterfall devono essere forniti come array.');
+            throw new Error(t('I livelli waterfall devono essere forniti come array.'));
           }
         }
         
         if (d.state) {
-          if (typeof d.state !== 'object') throw new Error('Sezione "state" non valida.');
-          if (d.state.waterfallCurrent && typeof d.state.waterfallCurrent !== 'object') throw new Error('Stato liquidità non valido.');
-          if (d.state.snapshots && !Array.isArray(d.state.snapshots)) throw new Error('Lo storico degli snapshot deve essere un array.');
-          if (d.state.transactions && !Array.isArray(d.state.transactions)) throw new Error('L\'elenco delle transazioni deve essere un array.');
-          if (d.state.reviews && !Array.isArray(d.state.reviews)) throw new Error('La lista dei bilanci annuali deve essere un array.');
+          if (typeof d.state !== 'object') throw new Error(t('Sezione "state" non valida.'));
+          if (d.state.waterfallCurrent && typeof d.state.waterfallCurrent !== 'object') throw new Error(t('Stato liquidità non valido.'));
+          if (d.state.snapshots && !Array.isArray(d.state.snapshots)) throw new Error(t('Lo storico degli snapshot deve essere un array.'));
+          if (d.state.transactions && !Array.isArray(d.state.transactions)) throw new Error(t('L\'elenco delle transazioni deve essere un array.'));
+          if (d.state.reviews && !Array.isArray(d.state.reviews)) throw new Error(t('La lista dei bilanci annuali deve essere un array.'));
         }
 
         const sanitizedData = sanitizeObject(d);
         if (sanitizedData.config) setConfig({ ...DEFAULT_CONFIG, ...sanitizedData.config });
         if (sanitizedData.state) setState({ ...DEFAULT_STATE, ...sanitizedData.state });
-        setToast({ message: 'Dati importati con successo', type: 'success' });
+        setToast({ message: t('Dati importati con successo'), type: 'success' });
       } catch (err: any) {
         console.error('Import error:', err);
-        setToast({ message: err.message || 'File JSON non valido', type: 'error' });
+        setToast({ message: err.message || t('File JSON non valido'), type: 'error' });
       }
     };
     reader.readAsText(file);
@@ -1780,12 +1795,12 @@ export default function PersonalFinanceDashboard() {
   const resetAll = () => {
     setConfirmDialog({
       title: 'Reset completo',
-      message: 'Verranno cancellati TUTTI i dati: configurazione, snapshot, eventi, transazioni. Operazione irreversibile (suggerito: esporta prima un backup).',
+      message: t('Verranno cancellati TUTTI i dati: configurazione, snapshot, eventi, transazioni. Operazione irreversibile (suggerito: esporta prima un backup).'),
       onConfirm: () => {
         setConfig(DEFAULT_CONFIG);
         setState(DEFAULT_STATE);
         setConfirmDialog(null);
-        setToast({ message: 'Dashboard resettata ai default', type: 'info' });
+        setToast({ message: t('Dashboard resettata ai default'), type: 'info' });
       },
     });
   };
@@ -2054,7 +2069,7 @@ export default function PersonalFinanceDashboard() {
       const isBonus = config.salary.bonusMonths.includes(d.getMonth());
       rows.push({
         key: k,
-        label: `${MONTHS_IT_SHORT[d.getMonth()]} ${d.getFullYear()}`,
+        label: `${monthShort(config.language, d.getMonth())} ${d.getFullYear()}`,
         year: d.getFullYear(),
         month: d.getMonth(),
         pacDone: state.events[`${k}-pac`] === 'done',
@@ -2098,7 +2113,7 @@ export default function PersonalFinanceDashboard() {
         label: `Traguardo ${years} Ann${years === 1 ? 'o' : 'i'}`,
         pacT: Math.round(pacVal),
         fonteT: Math.round(fonteVal),
-        note: `Proiezione accumulo a ${years * 12} mesi con PAC (${swr > 0 ? 'rendita ~' + fmt(swr) + '/mese' : ''})`,
+        note: t('Proiezione accumulo a {months} mesi con PAC', { months: years * 12 }) + (swr > 0 ? ` (${t('rendita ~{amount}/mese', { amount: fmt(swr) })})` : ''),
       });
     });
 
@@ -2147,7 +2162,7 @@ export default function PersonalFinanceDashboard() {
           label: `Traguardo Capitale ${fmtK(targetVal)}`,
           pacT: targetVal,
           fonteT: Math.round(fonteVal),
-          note: `Raggiungibile in circa ${months} mesi (~${(months/12).toFixed(1)} anni) di versamenti`,
+          note: t('Raggiungibile in circa {months} mesi (~{years} anni) di versamenti', { months, years: (months/12).toFixed(1) }),
         });
       }
     });
@@ -2178,8 +2193,8 @@ export default function PersonalFinanceDashboard() {
         pacT: targetVal,
         fonteT: Math.round(fonteVal),
         note: months > 0 
-          ? `Raggiungibile in circa ${months} mesi (~${(months/12).toFixed(1)} anni) di versamenti`
-          : 'Traguardo già raggiunto!',
+          ? t('Raggiungibile in circa {months} mesi (~{years} anni) di versamenti', { months, years: (months/12).toFixed(1) })
+          : t('Traguardo già raggiunto!'),
       });
     });
 
@@ -2205,17 +2220,23 @@ export default function PersonalFinanceDashboard() {
 
   // ─── Tabs ───
   const TABS = [
-    { id: 'dashboard', label: 'Dashboard',    icon: LayoutDashboard },
-    { id: 'portfolio', label: 'Portafoglio',  icon: BarChart3 },
-    { id: 'tax',       label: 'Fisco',        icon: Receipt },
-    { id: 'liquidity', label: 'Liquidità',    icon: Wallet },
-    { id: 'market',    label: 'Mercato',      icon: TrendingUp },
-    { id: 'analytics', label: 'Analytics',    icon: ArrowUpRight },
-    { id: 'fire',      label: 'FIRE',         icon: Flame },
-    { id: 'reviews',   label: 'Revisioni',    icon: FileText },
-    { id: 'history',   label: 'Storico',      icon: HistoryIcon },
-    { id: 'settings',  label: 'Impostazioni', icon: SettingsIcon },
+    { id: 'dashboard', label: t('Dashboard'),    icon: LayoutDashboard },
+    { id: 'portfolio', label: t('Portafoglio'),  icon: BarChart3 },
+    ...(config.modules.tax ? [{ id: 'tax', label: t('Fisco'), icon: Receipt }] : []),
+    { id: 'liquidity', label: t('Liquidità'),    icon: Wallet },
+    { id: 'market',    label: t('Mercato'),      icon: TrendingUp },
+    { id: 'analytics', label: t('Analytics'),    icon: ArrowUpRight },
+    ...(config.modules.fire ? [{ id: 'fire', label: t('FIRE'), icon: Flame }] : []),
+    { id: 'reviews',   label: t('Revisioni'),    icon: FileText },
+    { id: 'history',   label: t('Storico'),      icon: HistoryIcon },
+    { id: 'settings',  label: t('Impostazioni'), icon: SettingsIcon },
   ];
+
+  // Se il modulo della tab aperta viene disattivato, si torna alla dashboard.
+  useEffect(() => {
+    if (tab === 'tax' && !config.modules.tax) setTab('dashboard');
+    if (tab === 'fire' && !config.modules.fire) setTab('dashboard');
+  }, [tab, config.modules.tax, config.modules.fire]);
 
 
   if (!loaded) {
@@ -2223,7 +2244,7 @@ export default function PersonalFinanceDashboard() {
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
         <div className="flex flex-col items-center gap-3">
           <div className="w-8 h-8 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin" />
-          <p className="text-sm text-slate-500">Caricamento dashboard...</p>
+          <p className="text-sm text-slate-500">{t('Caricamento dashboard...')}</p>
         </div>
       </div>
     );
@@ -2236,10 +2257,30 @@ export default function PersonalFinanceDashboard() {
   // ─── ONBOARDING MODAL ───
   if (showOnboarding) {
     const steps = [
-      { title: 'Il tuo profilo', subtitle: 'Come ti chiami e quando sei nato?' },
-      { title: 'Stipendio & PAC', subtitle: 'Quanto guadagni e quanto investi ogni mese?' },
-      { title: 'Obiettivo FIRE', subtitle: 'A che età vuoi raggiungere l\'indipendenza finanziaria?' },
+      { title: t('Lingua'), subtitle: t('Scegli la lingua dell\'interfaccia') },
+      { title: t('Il tuo profilo'), subtitle: t('Come ti chiami e quando sei nato?') },
+      { title: t('Stipendio & PAC'), subtitle: t('Quanto guadagni e quanto investi ogni mese?') },
+      { title: t('Obiettivo FIRE'), subtitle: t('A che età vuoi raggiungere l\'indipendenza finanziaria?') },
     ];
+    // I moduli fiscali coprono solo la normativa italiana e non sono tradotti:
+    // chi sceglie l'inglese parte senza, ma può riattivarli dalle Impostazioni.
+    const pickLanguage = (lang: Lang) => {
+      const tl = makeT(lang);
+      setConfig(c => ({
+        ...c,
+        language: lang,
+        modules: lang === 'it'
+          ? { tax: true, pension: true, fire: true }
+          : { tax: false, pension: false, fire: true },
+        // il buffer predefinito e' dato, non UI: va tradotto qui alla creazione
+        waterfallLevels: (c.waterfallLevels || []).map(lv =>
+          lv.id === 'l1'
+            ? { ...lv, name: tl('Riserva di Emergenza'), desc: tl('Imprevisti e spese straordinarie') }
+            : lv
+        ),
+      }));
+      setOnboardingStep(1);
+    };
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm w-full max-w-md p-8">
@@ -2248,8 +2289,8 @@ export default function PersonalFinanceDashboard() {
               <Wallet size={20} strokeWidth={2.2} />
             </div>
             <div>
-              <h1 className="text-base font-semibold text-slate-900">Finance Personal Dashboard</h1>
-              <p className="text-xs text-slate-500">Configurazione iniziale — Step {onboardingStep + 1} di {steps.length}</p>
+              <h1 className="text-base font-semibold text-slate-900">{t('Finance Personal Dashboard')}</h1>
+              <p className="text-xs text-slate-500">{t('Configurazione iniziale — Step {step} di {total}', { step: onboardingStep + 1, total: steps.length })}</p>
             </div>
           </div>
           <div className="flex gap-1.5 mb-6">
@@ -2260,48 +2301,45 @@ export default function PersonalFinanceDashboard() {
           <h2 className="text-sm font-semibold text-slate-900 mb-0.5">{steps[onboardingStep].title}</h2>
           <p className="text-xs text-slate-500 mb-5">{steps[onboardingStep].subtitle}</p>
           {onboardingStep === 0 && (
-            <div className="space-y-4">
-              <div>
-                <label className="text-xs font-medium text-slate-700 block mb-1.5">Nome</label>
-                <input type="text" value={obName} onChange={e => setObName(e.target.value)}
-                  placeholder="es. Mario"
-                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white" />
-              </div>
-              <div>
-                <label className="text-xs font-medium text-slate-700 block mb-1.5">Anno di nascita</label>
-                <input type="number" value={obYear} onChange={e => setObYear(e.target.value)}
-                  min={1950} max={2010}
-                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white" />
-              </div>
-              <button onClick={() => obName.trim() && setOnboardingStep(1)} disabled={!obName.trim()}
-                className="w-full py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-50 flex items-center justify-center gap-2 mt-2">
-                Continua <ChevronRight size={15} />
-              </button>
+            <div className="space-y-3">
+              {LANGUAGES.map(l => (
+                <button key={l.id} onClick={() => pickLanguage(l.id)}
+                  className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-xl border transition-colors ${
+                    config.language === l.id
+                      ? 'border-emerald-500 bg-emerald-50 text-emerald-800'
+                      : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                  }`}>
+                  <span className="text-lg">{l.flag}</span>
+                  <span className="flex-1 text-left">{l.label}</span>
+                  {config.language === l.id && <Check size={15} className="text-emerald-600" />}
+                  <ChevronRight size={15} className="text-slate-400" />
+                </button>
+              ))}
+              <p className="text-[11px] text-slate-400">{t('Potrai cambiarla in qualsiasi momento dalle Impostazioni.')}</p>
             </div>
           )}
           {onboardingStep === 1 && (
             <div className="space-y-4">
               <div>
-                <label className="text-xs font-medium text-slate-700 block mb-1.5">Stipendio netto mensile (€)</label>
-                <input type="number" value={obSalary} onChange={e => setObSalary(e.target.value)}
-                  placeholder="es. 2000" min={0}
+                <label className="text-xs font-medium text-slate-700 block mb-1.5">{t('Nome')}</label>
+                <input type="text" value={obName} onChange={e => setObName(e.target.value)}
+                  placeholder={t('es. Mario')}
                   className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white" />
               </div>
               <div>
-                <label className="text-xs font-medium text-slate-700 block mb-1.5">Investimento mensile PAC (€)</label>
-                <input type="number" value={obPac} onChange={e => setObPac(e.target.value)}
-                  placeholder="es. 500" min={0}
+                <label className="text-xs font-medium text-slate-700 block mb-1.5">{t('Anno di nascita')}</label>
+                <input type="number" value={obYear} onChange={e => setObYear(e.target.value)}
+                  min={1950} max={2010}
                   className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white" />
               </div>
-              <p className="text-[11px] text-slate-400">Puoi modificare tutto nelle Impostazioni in qualsiasi momento.</p>
               <div className="flex gap-2 mt-2">
                 <button onClick={() => setOnboardingStep(0)}
                   className="flex-1 py-2 border border-slate-200 text-slate-700 text-sm font-medium rounded-lg hover:bg-slate-50 flex items-center justify-center gap-1">
-                  <ChevronLeft size={15} />Indietro
+                  <ChevronLeft size={15} />{t('Indietro')}
                 </button>
-                <button onClick={() => setOnboardingStep(2)}
-                  className="flex-1 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 flex items-center justify-center gap-1">
-                  Continua <ChevronRight size={15} />
+                <button onClick={() => obName.trim() && setOnboardingStep(2)} disabled={!obName.trim()}
+                  className="flex-1 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-50 flex items-center justify-center gap-1">
+                  {t('Continua')} <ChevronRight size={15} />
                 </button>
               </div>
             </div>
@@ -2309,44 +2347,71 @@ export default function PersonalFinanceDashboard() {
           {onboardingStep === 2 && (
             <div className="space-y-4">
               <div>
-                <label className="text-xs font-medium text-slate-700 block mb-1.5">Età target per il FIRE</label>
+                <label className="text-xs font-medium text-slate-700 block mb-1.5">{t('Stipendio netto mensile (€)')}</label>
+                <input type="number" value={obSalary} onChange={e => setObSalary(e.target.value)}
+                  placeholder={t('es. 2000')} min={0}
+                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-slate-700 block mb-1.5">{t('Investimento mensile PAC (€)')}</label>
+                <input type="number" value={obPac} onChange={e => setObPac(e.target.value)}
+                  placeholder={t('es. 500')} min={0}
+                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white" />
+              </div>
+              <p className="text-[11px] text-slate-400">{t('Puoi modificare tutto nelle Impostazioni in qualsiasi momento.')}</p>
+              <div className="flex gap-2 mt-2">
+                <button onClick={() => setOnboardingStep(1)}
+                  className="flex-1 py-2 border border-slate-200 text-slate-700 text-sm font-medium rounded-lg hover:bg-slate-50 flex items-center justify-center gap-1">
+                  <ChevronLeft size={15} />{t('Indietro')}
+                </button>
+                <button onClick={() => setOnboardingStep(3)}
+                  className="flex-1 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 flex items-center justify-center gap-1">
+                  {t('Continua')} <ChevronRight size={15} />
+                </button>
+              </div>
+            </div>
+          )}
+          {onboardingStep === 3 && (
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs font-medium text-slate-700 block mb-1.5">{t('Età target per il FIRE')}</label>
                 <input type="number" value={obRetireAge} onChange={e => setObRetireAge(e.target.value)}
-                  min={30} max={70} placeholder="es. 50"
+                  min={30} max={70} placeholder={t('es. 50')}
                   className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white" />
-                <p className="text-[11px] text-slate-400 mt-1">L'età in cui vuoi smettere di lavorare</p>
+                <p className="text-[11px] text-slate-400 mt-1">{t('L\'età in cui vuoi smettere di lavorare')}</p>
               </div>
               <div>
-                <label className="text-xs font-medium text-slate-700 block mb-1.5">Rendimento annuo atteso (%)</label>
+                <label className="text-xs font-medium text-slate-700 block mb-1.5">{t('Rendimento annuo atteso (%)')}</label>
                 <input type="number" value={obReturnRate} onChange={e => setObReturnRate(e.target.value)}
-                  min={1} max={12} step={0.5} placeholder="es. 5"
+                  min={1} max={12} step={0.5} placeholder={t('es. 5')}
                   className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white" />
-                <p className="text-[11px] text-slate-400 mt-1">Tasso reale storico S&P 500 ≈ 7%, prudente ≈ 5%</p>
+                <p className="text-[11px] text-slate-400 mt-1">{t('Tasso reale storico S&P 500 ≈ 7%, prudente ≈ 5%')}</p>
               </div>
               <div>
-                <label className="text-xs font-medium text-slate-700 block mb-1.5">Rendita mensile desiderata (€)</label>
+                <label className="text-xs font-medium text-slate-700 block mb-1.5">{t('Rendita mensile desiderata (€)')}</label>
                 <input type="number" value={obMonthlyExpense} onChange={e => setObMonthlyExpense(e.target.value)}
-                  placeholder="es. 2000" min={0}
+                  placeholder={t('es. 2000')} min={0}
                   className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white" />
                 {obMonthlyExpense && (
                   <p className="text-[11px] text-emerald-600 mt-1 font-medium">
-                    FIRE number stimato: {fmt(safeNum(obMonthlyExpense) * 12 / 0.04)} (SWR 4%)
+                    {t('FIRE number stimato: {amount} (SWR 4%)', { amount: fmt(safeNum(obMonthlyExpense) * 12 / 0.04) })}
                   </p>
                 )}
               </div>
               <div className="flex gap-2 mt-2">
-                <button onClick={() => setOnboardingStep(1)}
+                <button onClick={() => setOnboardingStep(2)}
                   className="flex-1 py-2 border border-slate-200 text-slate-700 text-sm font-medium rounded-lg hover:bg-slate-50 flex items-center justify-center gap-1">
-                  <ChevronLeft size={15} />Indietro
+                  <ChevronLeft size={15} />{t('Indietro')}
                 </button>
                 <button onClick={completeOnboarding}
                   className="flex-1 py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 flex items-center justify-center gap-1">
-                  <Check size={15} />Inizia
+                  <Check size={15} />{t('Inizia')}
                 </button>
               </div>
             </div>
           )}
           <button onClick={() => setShowOnboarding(false)} className="text-[11px] text-slate-400 hover:text-slate-600 mt-4 block mx-auto">
-            Salta — configuro tutto manualmente
+            {t('Salta — configuro tutto manualmente')}
           </button>
         </div>
       </div>
@@ -2363,49 +2428,49 @@ export default function PersonalFinanceDashboard() {
               <Wallet size={18} strokeWidth={2.2} />
             </div>
             <div>
-              <h1 className="text-base font-semibold text-slate-900 leading-tight">Finance Personal Dashboard</h1>
+              <h1 className="text-base font-semibold text-slate-900 leading-tight">{t('Finance Personal Dashboard')}</h1>
               <p className="text-xs text-slate-500 leading-tight">
-                {config.profile.name} · {ageFromYear(config.profile.birthYear)} anni · v{APP_VERSION}
+                {config.profile.name} · {t('{age} anni', { age: ageFromYear(config.profile.birthYear) })} · v{APP_VERSION}
               </p>
             </div>
           </div>
           {/* Cloud sync indicator */}
           <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-[11px] font-medium"
-            title="I tuoi dati sono salvati in cloud — sicuri da qualsiasi aggiornamento">
-            {syncStatus === 'saving' && <><div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" /><span className="text-amber-600 hidden sm:inline">Salvataggio...</span></>}
-            {syncStatus === 'saved' && <><div className="w-2 h-2 rounded-full bg-emerald-500" /><span className="text-emerald-600 hidden sm:inline">Salvato in cloud</span></>}
-            {syncStatus === 'error' && <><div className="w-2 h-2 rounded-full bg-rose-500" /><span className="text-rose-600 hidden sm:inline">Errore sync</span></>}
-            {syncStatus === 'idle' && <><div className="w-2 h-2 rounded-full bg-emerald-400" /><span className="text-slate-400 hidden sm:inline">Cloud sync attivo</span></>}
+            title={t('I tuoi dati sono salvati in cloud — sicuri da qualsiasi aggiornamento')}>
+            {syncStatus === 'saving' && <><div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" /><span className="text-amber-600 hidden sm:inline">{t('Salvataggio...')}</span></>}
+            {syncStatus === 'saved' && <><div className="w-2 h-2 rounded-full bg-emerald-500" /><span className="text-emerald-600 hidden sm:inline">{t('Salvato in cloud')}</span></>}
+            {syncStatus === 'error' && <><div className="w-2 h-2 rounded-full bg-rose-500" /><span className="text-rose-600 hidden sm:inline">{t('Errore sync')}</span></>}
+            {syncStatus === 'idle' && <><div className="w-2 h-2 rounded-full bg-emerald-400" /><span className="text-slate-400 hidden sm:inline">{t('Cloud sync attivo')}</span></>}
           </div>
           <button
             onClick={() => window.print()}
             className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors flex items-center gap-1"
-            title="Stampa Report PDF"
+            title={t('Stampa Report PDF')}
           >
             <FileText size={16} />
-            <span className="text-xs font-semibold hidden md:inline">Esporta PDF</span>
+            <span className="text-xs font-semibold hidden md:inline">{t('Esporta PDF')}</span>
           </button>
           <button
             onClick={() => updateConfig({ darkMode: !config.darkMode })}
             className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
-            title={config.darkMode ? "Attiva Light Mode" : "Attiva Dark Mode"}
+            title={config.darkMode ? t('Attiva Light Mode') : t('Attiva Dark Mode')}
           >
             {config.darkMode ? <Sun size={16} /> : <Moon size={16} />}
           </button>
           <button
             onClick={() => supabase.auth.signOut()}
             className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors"
-            title="Logout"
+            title={t('Esci')}
           >
             <LogOut size={16} />
           </button>
           <div className="text-right">
             <div className="text-xl sm:text-2xl font-bold text-slate-900 tabular-nums">{fmt(netWorth)}</div>
             <div className="text-xs text-slate-500 flex items-center justify-end gap-1.5">
-              <span>patrimonio netto</span>
+              <span>{t('patrimonio netto')}</span>
               {nwDelta !== 0 && prevSnap && (
                 <Badge color={nwDelta > 0 ? 'emerald' : 'rose'}>
-                  {nwDelta > 0 ? '+' : ''}{fmt(nwDelta)} vs last snap
+                  {nwDelta > 0 ? '+' : ''}{fmt(nwDelta)} {t('vs ultimo snapshot')}
                 </Badge>
               )}
             </div>
@@ -2414,12 +2479,12 @@ export default function PersonalFinanceDashboard() {
 
         {/* Tab nav */}
         <nav className="max-w-6xl mx-auto px-4 sm:px-6 flex gap-1 overflow-x-auto">
-          {TABS.map(t => {
-            const isActive = tab === t.id;
+          {TABS.map(tb => {
+            const isActive = tab === tb.id;
             return (
-              <button key={t.id} onClick={() => setTab(t.id)}
+              <button key={tb.id} onClick={() => setTab(tb.id)}
                 className={`flex items-center gap-2 px-3 py-2.5 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${isActive ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
-                <t.icon size={15} />{t.label}
+                <tb.icon size={15} />{tb.label}
               </button>
             );
           })}
@@ -2434,11 +2499,11 @@ export default function PersonalFinanceDashboard() {
           <div className="space-y-5">
             {/* Executive KPI Grid */}
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
-              <StatCard label="Patrimonio Netto" value={fmt(netWorth)} sub="Net Worth Totale" accent="emerald" icon={TrendingUp} large />
-              <StatCard label="ETF Scalable" value={fmt(state.etfValue)} sub="Core Portfolio" accent="blue" icon={TrendingUp} />
-              <StatCard label="Previdenza" value={fmt(state.fonteValue)} sub={`Fondo ${config.fonte.name || 'Pensione'}`} accent="purple" icon={PiggyBank} />
-              <StatCard label="Liquidità" value={fmt(totalLiq)} sub={`${((totalLiq / (netWorth || 1)) * 100).toFixed(1)}% del totale`} accent="amber" icon={Wallet} />
-              <StatCard label="PAC mensile" value={fmt(config.pac.monthlyAmount)} sub={`SDD il ${config.pac.payDay}° del mese`} accent="indigo" icon={CreditCard} />
+              <StatCard label={t('Patrimonio Netto')} value={fmt(netWorth)} sub="Net Worth Totale" accent="emerald" icon={TrendingUp} large />
+              <StatCard label={t('ETF Scalable')} value={fmt(state.etfValue)} sub="Core Portfolio" accent="blue" icon={TrendingUp} />
+              <StatCard label={t('Previdenza')} value={fmt(state.fonteValue)} sub={`Fondo ${config.fonte.name || 'Pensione'}`} accent="purple" icon={PiggyBank} />
+              <StatCard label={t('Liquidità')} value={fmt(totalLiq)} sub={t('{pct}% del totale', { pct: ((totalLiq / (netWorth || 1)) * 100).toFixed(1) })} accent="amber" icon={Wallet} />
+              <StatCard label={t('PAC mensile')} value={fmt(config.pac.monthlyAmount)} sub={t('Addebito il {day}° del mese', { day: config.pac.payDay })} accent="indigo" icon={CreditCard} />
             </div>
 
             {/* Performance Widget + Next Milestone side by side */}
@@ -2483,7 +2548,7 @@ export default function PersonalFinanceDashboard() {
                   return (
                     <Card className="flex-1 flex flex-col justify-between">
                       <CardHeader 
-                        title="Quotazioni & Performance ETF" 
+                        title={t('Quotazioni & Performance ETF')} 
                         subtitle={quotesLastFetch ? `Quotazioni real-time · Ultimo agg. ${quotesLastFetch}` : "Quotazioni in tempo reale via Yahoo Finance"} 
                         icon={TrendingUp} 
                         accentColor="blue"
@@ -2498,7 +2563,7 @@ export default function PersonalFinanceDashboard() {
                         {/* Summary Block */}
                         <div className="flex items-center justify-between bg-slate-50 dark:bg-slate-800/40 p-4 rounded-2xl border border-slate-100 dark:border-slate-800">
                           <div>
-                            <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider block">Variazione ETF Oggi</span>
+                            <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider block">{t('Variazione ETF Oggi')}</span>
                             <span className={`text-xl font-bold tabular-nums ${isPos ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
                               {totalChangeEur >= 0 ? '+' : ''}{fmt2(totalChangeEur)} ({totalChangePct >= 0 ? '+' : ''}{totalChangePct.toFixed(2)}%)
                             </span>
@@ -2557,15 +2622,15 @@ export default function PersonalFinanceDashboard() {
                   
                   return (
                     <Card>
-                      <CardHeader title="Prossimo Traguardo" subtitle="La tua motivazione finanziaria immediata" icon={Trophy} accentColor="indigo" />
+                      <CardHeader title={t('Prossimo Traguardo')} subtitle={t('La tua motivazione finanziaria immediata')} icon={Trophy} accentColor="indigo" />
                       <div className="px-5 pb-5 space-y-3.5">
                         <div>
                           <div className="flex justify-between items-start gap-2 flex-wrap">
                             <span className="text-base font-bold text-slate-900 dark:text-slate-100">{nextMilestone.label}</span>
-                            <Badge color="indigo">Target</Badge>
+                            <Badge color="indigo">{t('Target')}</Badge>
                           </div>
                           <div className="text-xs text-slate-500 mt-1">
-                            Nel <strong>{nextMilestone.year}</strong> all'età di <strong>{nextMilestone.age} anni</strong>
+                            {t('Nel')} <strong>{nextMilestone.year}</strong> {t("all'età di")} <strong>{t('{age} anni', { age: nextMilestone.age })}</strong>
                           </div>
                         </div>
 
@@ -2578,7 +2643,7 @@ export default function PersonalFinanceDashboard() {
                         </div>
 
                         <div className="text-[11px] text-slate-600 dark:text-slate-300 bg-slate-50 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-800 p-2.5 rounded-xl leading-relaxed">
-                          <strong>Dettaglio traguardo:</strong> {nextMilestone.note}
+                          <strong>{t('Dettaglio traguardo:')}</strong> {nextMilestone.note}
                         </div>
                       </div>
                     </Card>
@@ -2602,36 +2667,36 @@ export default function PersonalFinanceDashboard() {
                   const daysToSal = config.salary.payDay - cd;
 
                   if (cd === config.salary.payDay && !state.events[salKey]) {
-                    actions.push({ priority: 1, icon: Briefcase, color: 'emerald', title: 'Stipendio in arrivo oggi', desc: `${fmt(currentSalary)}${isBonusMonth ? ' (mensilità bonus)' : ''} — conferma quando arriva e aggiorna il waterfall` });
+                    actions.push({ priority: 1, icon: Briefcase, color: 'emerald', title: t('Stipendio in arrivo oggi'), desc: `${fmt(currentSalary)}${isBonusMonth ? ' ' + t('(mensilità bonus)') : ''} — ${t('conferma quando arriva e aggiorna il waterfall')}` });
                   } else if (daysToSal === 1 && !state.events[salKey]) {
-                    actions.push({ priority: 2, icon: Briefcase, color: 'blue', title: 'Stipendio domani', desc: `Atteso ${fmt(currentSalary)}` });
+                    actions.push({ priority: 2, icon: Briefcase, color: 'blue', title: t('Stipendio domani'), desc: t('Atteso {amount}', { amount: fmt(currentSalary) }) });
                   }
 
                   if (cd === config.pac.payDay && !state.events[pacKey]) {
-                    actions.push({ priority: 1, icon: CreditCard, color: 'indigo', title: 'PAC in esecuzione oggi', desc: `${fmt(config.pac.monthlyAmount)} su ${config.pac.broker} — verifica esecuzione SDD` });
+                    actions.push({ priority: 1, icon: CreditCard, color: 'indigo', title: t('PAC in esecuzione oggi'), desc: t('{amount} su {broker} — verifica esecuzione addebito', { amount: fmt(config.pac.monthlyAmount), broker: config.pac.broker }) });
                   } else if (cd > config.pac.payDay && !state.events[pacKey]) {
-                    actions.push({ priority: 1, icon: AlertCircle, color: 'amber', title: 'PAC non confermato', desc: `Doveva partire il ${config.pac.payDay} — verifica su ${config.pac.broker}` });
+                    actions.push({ priority: 1, icon: AlertCircle, color: 'amber', title: t('PAC non confermato'), desc: t('Doveva partire il {day} — verifica su {broker}', { day: config.pac.payDay, broker: config.pac.broker }) });
                   } else if (daysToPac === 1 && !state.events[pacKey]) {
-                    actions.push({ priority: 2, icon: CreditCard, color: 'blue', title: 'PAC domani', desc: `Assicurati che ${fmt(config.pac.monthlyAmount)} sia disponibile su L3` });
+                    actions.push({ priority: 2, icon: CreditCard, color: 'blue', title: t('PAC domani'), desc: t('Assicurati che {amount} sia disponibile su L3', { amount: fmt(config.pac.monthlyAmount) }) });
                   }
 
                   if (cd >= config.salary.payDay && state.events[salKey] && lv3 && lv3Cur < (lv3.cap || 0) * 0.7) {
-                    actions.push({ priority: 2, icon: Wallet, color: 'amber', title: 'L3 sotto soglia operativa', desc: `Liquidità operativa a ${fmt(lv3Cur)} (target ${fmt(lv3.cap || 0)}) — rabbocca dal conto principale` });
+                    actions.push({ priority: 2, icon: Wallet, color: 'amber', title: t('L3 sotto soglia operativa'), desc: t('Liquidità operativa a {current} (target {target}) — rabbocca dal conto principale', { current: fmt(lv3Cur), target: fmt(lv3.cap || 0) }) });
                   }
 
                   if (lv4Cur >= 1000) {
-                    actions.push({ priority: 3, icon: Rocket, color: 'indigo', title: 'Overflow L4 pronto per il mercato', desc: `${fmt(lv4Cur)} disponibili per acquisti tattici DCA su S&P 500` });
+                    actions.push({ priority: 3, icon: Rocket, color: 'indigo', title: t('Overflow L4 pronto per il mercato'), desc: t('{amount} disponibili per acquisti tattici DCA su S&P 500', { amount: fmt(lv4Cur) }) });
                   }
 
                   config.waterfallLevels.slice(0, 3).forEach(lv => {
                     const cur = state.waterfallCurrent[lv.id] || 0;
                     if (lv.cap > 0 && cur > lv.cap * 1.1) {
-                      actions.push({ priority: 3, icon: ChevronRight, color: 'amber', title: `Overflow su ${lv.name}`, desc: `${fmt(cur - lv.cap)} oltre il cap — sposta su L4 o investi` });
+                      actions.push({ priority: 3, icon: ChevronRight, color: 'amber', title: t('Overflow su {level}', { level: lv.name }), desc: t('{amount} oltre il cap — sposta su L4 o investi', { amount: fmt(cur - lv.cap) }) });
                     }
                   });
 
                   if (cm === 4 && state.reviews.length === 0) {
-                    actions.push({ priority: 3, icon: FileText, color: 'indigo', title: 'Revisione annuale 2026', desc: 'Documenta le decisioni strutturali fatte quest\'anno nella sezione Revisioni' });
+                    actions.push({ priority: 3, icon: FileText, color: 'indigo', title: t('Revisione annuale {year}', { year: cy }), desc: t('Documenta le decisioni strutturali fatte quest\'anno nella sezione Revisioni') });
                   }
 
                   if (actions.length === 0) {
@@ -2642,8 +2707,8 @@ export default function PersonalFinanceDashboard() {
                             <CheckCircle2 size={18} />
                           </div>
                           <div>
-                            <p className="text-xs font-bold text-slate-900 dark:text-slate-100">Tutto in ordine</p>
-                            <p className="text-[11px] text-slate-500">Nessuna azione pendente. Il piano sta procedendo regolarmente.</p>
+                            <p className="text-xs font-bold text-slate-900 dark:text-slate-100">{t('Tutto in ordine')}</p>
+                            <p className="text-[11px] text-slate-500">{t('Nessuna azione pendente. Il piano sta procedendo regolarmente.')}</p>
                           </div>
                         </div>
                       </Card>
@@ -2655,7 +2720,7 @@ export default function PersonalFinanceDashboard() {
 
                   return (
                     <Card className="flex-1">
-                      <CardHeader title="Cosa fare oggi" subtitle={`${actions.length} ${actions.length === 1 ? 'azione contestuale' : 'azioni contestuali'}`} icon={Sparkles} accentColor="emerald" />
+                      <CardHeader title={t('Cosa fare oggi')} subtitle={`${actions.length} ${actions.length === 1 ? 'azione contestuale' : 'azioni contestuali'}`} icon={Sparkles} accentColor="emerald" />
                       <div className="px-5 pb-5 space-y-2">
                         {topActions.map((a, i) => {
                           const colors = {
@@ -2683,7 +2748,7 @@ export default function PersonalFinanceDashboard() {
                                 <p className="text-xs font-bold text-slate-900 dark:text-slate-100">{a.title}</p>
                                 <p className="text-[10.5px] text-slate-600 dark:text-slate-300 mt-0.5 leading-snug">{a.desc}</p>
                               </div>
-                              {a.priority === 1 && <Badge color={a.color}>Ora</Badge>}
+                              {a.priority === 1 && <Badge color={a.color}>{t('Ora')}</Badge>}
                             </div>
                           );
                         })}
@@ -2698,7 +2763,7 @@ export default function PersonalFinanceDashboard() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               {/* Card Crescita Annua */}
               <Card>
-                <CardHeader title="Obiettivo Crescita Patrimonio" subtitle="Tracciamento dell'aumento percentuale annuo del patrimonio netto" icon={TrendingUp} accentColor="emerald" />
+                <CardHeader title={t('Obiettivo Crescita Patrimonio')} subtitle={t("Tracciamento dell'aumento percentuale annuo del patrimonio netto")} icon={TrendingUp} accentColor="emerald" />
                 <div className="px-5 pb-5 flex flex-col justify-between h-[210px]">
                   {growthTracker ? (
                     <>
@@ -2719,7 +2784,7 @@ export default function PersonalFinanceDashboard() {
                              growthTracker.currentGrowth >= growthTracker.targetPct * 0.5 ? '🟡 Dietro' :
                              '🔴 Molto dietro'}
                           </span>
-                          <p className="text-[10px] text-slate-400 mt-1.5">Inizio anno: {fmt(growthTracker.startNw)}</p>
+                          <p className="text-[10px] text-slate-400 mt-1.5">{t('Inizio anno: {amount}', { amount: fmt(growthTracker.startNw) })}</p>
                         </div>
                       </div>
                       
@@ -2733,16 +2798,16 @@ export default function PersonalFinanceDashboard() {
 
                       <p className="text-[11px] text-slate-500 bg-slate-50 dark:bg-slate-800/30 border border-slate-100 dark:border-slate-800 rounded-lg p-2 mt-2">
                         {growthTracker.remainingToTarget > 0 ? (
-                          <>Mancano <strong>{fmt(growthTracker.remainingToTarget)}</strong> per raggiungere l'obiettivo patrimoniale di fine anno.</>
+                          <>{t('Mancano')} <strong>{fmt(growthTracker.remainingToTarget)}</strong> {t("per raggiungere l'obiettivo patrimoniale di fine anno.")}</>
                         ) : (
-                          <strong className="text-emerald-700 dark:text-emerald-400">✓ Obiettivo annuale raggiunto! Tutto quello che accumuli d'ora in poi è surplus.</strong>
+                          <strong className="text-emerald-700 dark:text-emerald-400">{t("✓ Obiettivo annuale raggiunto! Tutto quello che accumuli d'ora in poi è surplus.")}</strong>
                         )}
                       </p>
                     </>
                   ) : (
                     <div className="flex flex-col items-center justify-center text-center h-full text-slate-400 py-6">
                       <TrendingUp size={24} className="mb-2 text-slate-300" />
-                      <p className="text-xs">Definisci un target di crescita nelle Impostazioni per visualizzare questo pannello.</p>
+                      <p className="text-xs">{t('Definisci un target di crescita nelle Impostazioni per visualizzare questo pannello.')}</p>
                     </div>
                   )}
                 </div>
@@ -2750,18 +2815,18 @@ export default function PersonalFinanceDashboard() {
 
               {/* Card Obiettivi Personali */}
               <Card>
-                <CardHeader title="Obiettivi Personali" subtitle="Traguardi finanziari dedicati (es. auto, casa, emergenze)" icon={Trophy} accentColor="indigo"
+                <CardHeader title={t('Obiettivi Personali')} subtitle={t('Traguardi finanziari dedicati (es. auto, casa, emergenze)')} icon={Trophy} accentColor="indigo"
                   action={
                     <Button size="xs" icon={Plus} variant="primary" onClick={() => {
                       setNewGoal({ title: '', targetAmount: '', currentAmount: '', deadline: '', color: '#3b82f6' });
                       setShowAddGoal(true);
-                    }}>Nuovo Obiettivo</Button>
+                    }}>{t('Nuovo Obiettivo')}</Button>
                   } />
                 <div className="px-5 pb-5 h-[210px] overflow-y-auto space-y-3.5 pr-2 custom-scrollbar">
                   {(config.goals || []).length === 0 ? (
                     <div className="flex flex-col items-center justify-center text-center h-full text-slate-400 py-6">
                       <Trophy size={24} className="mb-2 text-slate-300" />
-                      <p className="text-xs">Nessun obiettivo impostato. Clicca su "Nuovo Obiettivo" per aggiungerne uno.</p>
+                      <p className="text-xs">{t('Nessun obiettivo impostato. Clicca su "Nuovo Obiettivo" per aggiungerne uno.')}</p>
                     </div>
                   ) : (
                     (config.goals || []).map(g => {
@@ -2795,7 +2860,7 @@ export default function PersonalFinanceDashboard() {
             {/* History Chart */}
             {state.snapshots.length >= 2 && (
               <Card>
-                <CardHeader title="Andamento patrimonio" subtitle={`${state.snapshots.length} snapshot registrati`} icon={TrendingUp} accentColor="emerald" />
+                <CardHeader title={t('Andamento patrimonio')} subtitle={`${state.snapshots.length} snapshot registrati`} icon={TrendingUp} accentColor="emerald" />
                 <div className="px-5 pb-5">
                   <ResponsiveContainer width="100%" height={220}>
                     <AreaChart data={[...state.snapshots].filter(s => s && s.date && s.nw !== undefined)}>
@@ -2826,7 +2891,7 @@ export default function PersonalFinanceDashboard() {
               {/* Sistema a cascata */}
               <Card>
                 <CardHeader
-                  title="Sistema a cascata (Waterfall)"
+                  title={t('Sistema a cascata (Waterfall)')}
                   subtitle={`Liquidità totale gestita: ${fmt(totalLiq)}`}
                   icon={Wallet}
                   accentColor="emerald"
@@ -2838,7 +2903,7 @@ export default function PersonalFinanceDashboard() {
                         setVoluntaryAlloc(init);
                         setVoluntaryAmount('');
                         setShowVoluntary(true);
-                      }}>Versamento</Button>
+                      }}>{t('Versamento')}</Button>
                       <Button size="sm" icon={editWaterfall ? X : Edit3} onClick={() => setEditWaterfall(!editWaterfall)}>
                         {editWaterfall ? 'Chiudi' : 'Modifica'}
                       </Button>
@@ -2878,7 +2943,7 @@ export default function PersonalFinanceDashboard() {
                           )}
                           {i === 3 && current > 0 && (
                             <p className="text-[11px] text-indigo-700 dark:text-indigo-400 mt-1.5 flex items-center gap-1">
-                              <Rocket size={11} />Pronto per acquisti tattici DCA S&P 500
+                              <Rocket size={11} />{t('Pronto per acquisti tattici DCA S&P 500')}
                             </p>
                           )}
                         </div>
@@ -2891,7 +2956,7 @@ export default function PersonalFinanceDashboard() {
               {/* Conto Deposito Svincolato */}
               <Card>
                 <CardHeader
-                  title="Conto Deposito Svincolato"
+                  title={t('Conto Deposito Svincolato')}
                   subtitle={`Rapporto liquidità fruttifera (1.5%) vs infruttifera`}
                   icon={Coffee}
                   accentColor="amber"
@@ -2902,7 +2967,7 @@ export default function PersonalFinanceDashboard() {
                     <div className="space-y-4">
                       <div>
                         <div className="flex items-center justify-between text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                          <span className="flex items-center gap-1"><PiggyBank size={14} className="text-amber-500" />Ripartizione Attiva</span>
+                          <span className="flex items-center gap-1"><PiggyBank size={14} className="text-amber-500" />{t('Ripartizione Attiva')}</span>
                           <span className="tabular-nums font-bold text-amber-600 dark:text-amber-400">Conto Deposito: {((contoDepositoData.amount / (totalLiq || 1)) * 100).toFixed(0)}%</span>
                         </div>
                         <div className="flex h-4 rounded-full overflow-hidden bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
@@ -2922,7 +2987,7 @@ export default function PersonalFinanceDashboard() {
                       {/* Interactive Slider */}
                       <div className="bg-slate-50 dark:bg-slate-800/40 p-4 rounded-xl border border-slate-100 dark:border-slate-800">
                         <div className="flex justify-between text-xs font-bold text-slate-800 dark:text-slate-200 mb-1">
-                          <span>Suddividi Liquidità</span>
+                          <span>{t('Suddividi Liquidità')}</span>
                           <span className="tabular-nums text-amber-600 dark:text-amber-400">{fmt(contoDepositoData.amount)} su Deposito</span>
                         </div>
                         <input
@@ -2935,7 +3000,7 @@ export default function PersonalFinanceDashboard() {
                           className="w-full h-2 bg-slate-200 dark:bg-slate-700 rounded-lg appearance-none cursor-pointer accent-amber-500 my-3"
                         />
                         <div className="flex justify-between text-[9px] text-slate-400">
-                          <span>Tutto sul c/c (€0)</span>
+                          <span>{t('Tutto sul c/c (€0)')}</span>
                           <span>Tutto su Deposito ({fmt(totalLiq)})</span>
                         </div>
                       </div>
@@ -2944,15 +3009,15 @@ export default function PersonalFinanceDashboard() {
                       <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/30 rounded-xl p-3 text-xs text-amber-800 dark:text-amber-300 flex items-start gap-2.5">
                         <Coffee size={16} className="text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
                         <div>
-                          <p className="font-semibold text-[10px] sm:text-[11px] uppercase tracking-wider text-amber-950 dark:text-amber-200">Analisi Rendimento Conto Deposito</p>
+                          <p className="font-semibold text-[10px] sm:text-[11px] uppercase tracking-wider text-amber-950 dark:text-amber-200">{t('Analisi Rendimento Conto Deposito')}</p>
                           <p className="text-[11px] mt-1 leading-relaxed">
-                            Interesse netto: <strong>{fmt2(contoDepositoData.netInterest)}/anno</strong> (tasso {contoDepositoData.rate}% lordo, pari a {fmt2(contoDepositoData.grossInterest)} lordi, meno 26% tasse, cioè un tasso netto del <strong>{(contoDepositoData.rate * 0.74).toFixed(2)}%</strong>).
+                            {t('Interesse netto:')} <strong>{fmt2(contoDepositoData.netInterest)}/{t('anno')}</strong> {t('(tasso {rate}% lordo, pari a {gross} lordi, meno 26% tasse, cioè un tasso netto del', { rate: contoDepositoData.rate, gross: fmt2(contoDepositoData.grossInterest) })} <strong>{(contoDepositoData.rate * 0.74).toFixed(2)}%</strong>).
                           </p>
                           <p className="text-[11px] mt-1 leading-relaxed">
-                            Rendimento Reale Netto: <strong className={((contoDepositoData.rate * 0.74) - config.expectedInflationRate) >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}>{((contoDepositoData.rate * 0.74) - config.expectedInflationRate).toFixed(2)}%</strong> (sottraendo l'inflazione attesa del {config.expectedInflationRate}%).
+                            {t('Rendimento Reale Netto:')} <strong className={((contoDepositoData.rate * 0.74) - config.expectedInflationRate) >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}>{((contoDepositoData.rate * 0.74) - config.expectedInflationRate).toFixed(2)}%</strong> {t("(sottraendo l'inflazione attesa del {rate}%).", { rate: config.expectedInflationRate })}
                           </p>
                           <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-1.5 font-medium italic">
-                            Guadagna <strong>{fmt2(contoDepositoData.netInterestDaily)}/giorno</strong> di interessi passivi puliti. Equivale a <strong>~{contoDepositoData.caffeDaily.toFixed(1)} caffè al giorno!</strong> ☕
+                            Guadagna <strong>{fmt2(contoDepositoData.netInterestDaily)}/giorno</strong> {t('di interessi passivi puliti. Equivale a')} <strong>~{contoDepositoData.caffeDaily.toFixed(1)} caffè al giorno!</strong> ☕
                           </p>
                         </div>
                       </div>
@@ -2964,42 +3029,42 @@ export default function PersonalFinanceDashboard() {
 
             {/* Erosione da Inflazione Card */}
             <Card>
-              <CardHeader title="Erosione da Inflazione sulla Liquidità" subtitle={`Impatto dell'inflazione stimata al ${config.expectedInflationRate}% sul tuo cash`} icon={TrendingDown} accentColor="rose" />
+              <CardHeader title={t('Erosione da Inflazione sulla Liquidità')} subtitle={t("Impatto dell'inflazione stimata al {rate}% sul tuo cash", { rate: config.expectedInflationRate })} icon={TrendingDown} accentColor="rose" />
               <div className="px-5 pb-5 space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div className="bg-slate-50 dark:bg-slate-800/40 p-3.5 rounded-xl border border-slate-100 dark:border-slate-800">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-1">Liquidità Infruttifera (c/c)</span>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-1">{t('Liquidità Infruttifera (c/c)')}</span>
                     <div className="text-base font-bold text-slate-900 dark:text-slate-100 tabular-nums">
                       {fmt(contoDepositoData.freeLiq)}
                     </div>
-                    <p className="text-[9px] text-slate-400 mt-0.5">Soggetta a perdita di valore intera</p>
+                    <p className="text-[9px] text-slate-400 mt-0.5">{t('Soggetta a perdita di valore intera')}</p>
                   </div>
                   <div className="bg-rose-50/50 dark:bg-rose-950/20 p-3.5 rounded-xl border border-rose-100 dark:border-rose-900/30">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-rose-600 dark:text-rose-400 block mb-1">Erosione Potere d'Acquisto Annua</span>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-rose-600 dark:text-rose-400 block mb-1">{t("Erosione Potere d'Acquisto Annua")}</span>
                     <div className="text-base font-bold text-rose-700 dark:text-rose-400 tabular-nums">
-                      −{fmt(contoDepositoData.freeLiq * (config.expectedInflationRate / 100))} / anno
+                      −{fmt(contoDepositoData.freeLiq * (config.expectedInflationRate / 100))} / {t('anno')}
                     </div>
-                    <p className="text-[9px] text-rose-600 dark:text-rose-400 mt-0.5">Perdita di valore reale stimata</p>
+                    <p className="text-[9px] text-rose-600 dark:text-rose-400 mt-0.5">{t('Perdita di valore reale stimata')}</p>
                   </div>
                   <div className="bg-amber-50/50 dark:bg-amber-950/20 p-3.5 rounded-xl border border-amber-100 dark:border-amber-900/30">
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400 block mb-1">Erosione Coperta da Conto Deposito</span>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400 block mb-1">{t('Erosione Coperta da Conto Deposito')}</span>
                     <div className="text-base font-bold text-amber-700 dark:text-amber-400 tabular-nums">
-                      {fmt(contoDepositoData.netInterest)} / anno
+                      {fmt(contoDepositoData.netInterest)} / {t('anno')}
                     </div>
-                    <p className="text-[9px] text-amber-600 dark:text-amber-400 mt-0.5">Interessi netti generati</p>
+                    <p className="text-[9px] text-amber-600 dark:text-amber-400 mt-0.5">{t('Interessi netti generati')}</p>
                   </div>
                 </div>
 
                 <div className="bg-rose-50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/30 rounded-xl p-3.5 text-xs text-rose-800 dark:text-rose-300 flex items-start gap-2.5">
                   <AlertCircle size={16} className="text-rose-600 dark:text-rose-400 flex-shrink-0 mt-0.5" />
                   <div>
-                    <strong className="text-[11px] uppercase tracking-wider">L'inflazione è una tassa invisibile</strong>
+                    <strong className="text-[11px] uppercase tracking-wider">{t("L'inflazione è una tassa invisibile")}</strong>
                     <p className="text-[11px] mt-1 leading-relaxed">
-                      Con un'inflazione stimata al <strong>{config.expectedInflationRate}%</strong>, la tua liquidità infruttifera di <strong>{fmt(contoDepositoData.freeLiq)}</strong> perde circa <strong>{fmt(contoDepositoData.freeLiq * (config.expectedInflationRate / 100))}</strong> di potere d'acquisto all'anno.
+                      {t("Con un'inflazione stimata al")} <strong>{config.expectedInflationRate}%</strong>{t(', la tua liquidità infruttifera di')} <strong>{fmt(contoDepositoData.freeLiq)}</strong> {t('perde circa')} <strong>{fmt(contoDepositoData.freeLiq * (config.expectedInflationRate / 100))}</strong> {t("di potere d'acquisto all'anno.")}
                       {contoDepositoData.amount > 0 ? (
-                        <span> Fortunatamente, allocando <strong>{fmt(contoDepositoData.amount)}</strong> sul Conto Deposito, riesci a recuperare <strong>{fmt(contoDepositoData.netInterest)}</strong>, coprendo il <strong>{((contoDepositoData.netInterest / Math.max(1, contoDepositoData.freeLiq * (config.expectedInflationRate / 100))) * 100).toFixed(0)}%</strong> dell'erosione totale!</span>
+                        <span> {t('Fortunatamente, allocando')} <strong>{fmt(contoDepositoData.amount)}</strong> {t('sul Conto Deposito, riesci a recuperare')} <strong>{fmt(contoDepositoData.netInterest)}</strong>{t(', coprendo il')} <strong>{((contoDepositoData.netInterest / Math.max(1, contoDepositoData.freeLiq * (config.expectedInflationRate / 100))) * 100).toFixed(0)}%</strong> {t("dell'erosione totale!")}</span>
                       ) : (
-                        <span> Valuta di allocare una parte della liquidità sul Conto Deposito o investirla tramite il PAC per proteggerla dall'inflazione.</span>
+                        <span> {t("Valuta di allocare una parte della liquidità sul Conto Deposito o investirla tramite il PAC per proteggerla dall'inflazione.")}</span>
                       )}
                     </p>
                   </div>
@@ -3010,8 +3075,8 @@ export default function PersonalFinanceDashboard() {
             {/* Budget Spese & Cashflow margins Card */}
             <Card>
               <CardHeader
-                title="Bilancio Spese & Margine di Cassa"
-                subtitle={`Analisi entrate e uscite di ${MONTHS_IT[cm]} ${cy}`}
+                title={t('Bilancio Spese & Margine di Cassa')}
+                subtitle={t('Analisi entrate e uscite di {month} {year}', { month: monthName(config.language, cm), year: cy })}
                 icon={Calendar}
                 accentColor="blue"
                 action={
@@ -3024,7 +3089,7 @@ export default function PersonalFinanceDashboard() {
                     }}>
                       Registra Spese Reali
                     </Button>
-                    {isBonusMonth && <Badge color="amber" icon={Sparkles}>Mese bonus attivo</Badge>}
+                    {isBonusMonth && <Badge color="amber" icon={Sparkles}>{t('Mese bonus attivo')}</Badge>}
                   </div>
                 }
               />
@@ -3033,25 +3098,25 @@ export default function PersonalFinanceDashboard() {
                 <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 pt-1">
                   <div className="text-center bg-emerald-50/50 dark:bg-emerald-950/10 p-2.5 rounded-xl border border-emerald-100/50 dark:border-emerald-900/20">
                     <div className="text-sm sm:text-base font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">{fmt(currentSalary)}</div>
-                    <div className="text-[10px] text-slate-500 mt-0.5">Stipendio Netto</div>
+                    <div className="text-[10px] text-slate-500 mt-0.5">{t('Stipendio Netto')}</div>
                   </div>
                   <div className="text-center bg-rose-50/30 dark:bg-rose-950/10 p-2.5 rounded-xl border border-rose-100/30 dark:border-rose-900/20">
                     <div className="text-sm sm:text-base font-semibold text-rose-600 dark:text-rose-400 tabular-nums">−{fmt(totalFixedExpenses)}</div>
-                    <div className="text-[10px] text-slate-500 mt-0.5">Spese Fisse</div>
+                    <div className="text-[10px] text-slate-500 mt-0.5">{t('Spese Fisse')}</div>
                   </div>
                   <div className="text-center bg-rose-50/30 dark:bg-rose-950/10 p-2.5 rounded-xl border border-rose-100/30 dark:border-rose-900/20">
                     <div className="text-sm sm:text-base font-semibold text-rose-500 dark:text-rose-400 tabular-nums">−{fmt(totalVariableExpenses)}</div>
-                    <div className="text-[10px] text-slate-500 mt-0.5">Spese Variabili</div>
+                    <div className="text-[10px] text-slate-500 mt-0.5">{t('Spese Variabili')}</div>
                   </div>
                   <div className="text-center bg-indigo-50/30 dark:bg-indigo-950/10 p-2.5 rounded-xl border border-indigo-100/30 dark:border-indigo-900/20">
                     <div className="text-sm sm:text-base font-semibold text-indigo-600 dark:text-indigo-400 tabular-nums">−{fmt(config.pac.monthlyAmount)}</div>
-                    <div className="text-[10px] text-slate-500 mt-0.5">PAC Mensile</div>
+                    <div className="text-[10px] text-slate-500 mt-0.5">{t('PAC Mensile')}</div>
                   </div>
                   <div className="text-center bg-blue-50/50 dark:bg-blue-950/10 p-2.5 rounded-xl border border-blue-100/50 dark:border-blue-900/20 col-span-2 sm:col-span-1">
                     <div className={`text-sm sm:text-base font-bold tabular-nums ${realMargin >= 0 ? 'text-blue-700 dark:text-blue-400' : 'text-amber-600 dark:text-amber-400'}`}>
                       {realMargin >= 0 ? '+' : ''}{fmt(realMargin)}
                     </div>
-                    <div className="text-[10px] text-slate-500 mt-0.5">Margine Reale</div>
+                    <div className="text-[10px] text-slate-500 mt-0.5">{t('Margine Reale')}</div>
                   </div>
                 </div>
 
@@ -3060,7 +3125,7 @@ export default function PersonalFinanceDashboard() {
                   <div className="bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900/30 rounded-xl px-4 py-3 flex items-start gap-2.5 text-xs text-blue-800 dark:text-blue-300">
                     <Rocket size={15} className="text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5" />
                     <div>
-                      <strong>Margine attivo disponibile: {fmt(realMargin)}</strong> — Questa quota avanza ogni mese dopo aver coperto tutte le spese stimate e aver eseguito regolarmente il PAC. Se hai liquidità residua, valuta un DCA volontario su L4 per investire attivamente questa quota.
+                      <strong>{t('Margine attivo disponibile: {amount}', { amount: fmt(realMargin) })}</strong> — {t('Questa quota avanza ogni mese dopo aver coperto tutte le spese stimate e aver eseguito regolarmente il PAC. Se hai liquidità residua, valuta un DCA volontario su L4 per investire attivamente questa quota.')}
                     </div>
                   </div>
                 )}
@@ -3068,19 +3133,19 @@ export default function PersonalFinanceDashboard() {
                   <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/30 rounded-xl px-4 py-3 flex items-start gap-2.5 text-xs text-amber-800 dark:text-amber-300">
                     <AlertCircle size={15} className="text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
                     <div>
-                      <strong>Il PAC supera la capacità di risparmio di {fmt(Math.abs(realMargin))}</strong> — Il tuo budget indica che le uscite stimate e il PAC superano le entrate. Monitora l'andamento reale per evitare sconfinamenti o valuta di regolare temporaneamente la quota PAC.
+                      <strong>{t('Il PAC supera la capacità di risparmio di {amount}', { amount: fmt(Math.abs(realMargin)) })}</strong> — {t("Il tuo budget indica che le uscite stimate e il PAC superano le entrate. Monitora l'andamento reale per evitare sconfinamenti o valuta di regolare temporaneamente la quota PAC.")}
                     </div>
                   </div>
                 )}
                 {totalFixedExpenses === 0 && (
-                  <p className="text-[11px] text-slate-400 text-center py-2">Configura le spese fisse in Impostazioni per visualizzare l'alert di margine</p>
+                  <p className="text-[11px] text-slate-400 text-center py-2">{t("Configura le spese fisse in Impostazioni per visualizzare l'alert di margine")}</p>
                 )}
 
                 {/* Detailed budgets grid */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5 pt-2 border-t border-slate-100 dark:border-slate-800">
                   {/* Spese Fisse */}
                   <div>
-                    <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2.5">Breakdown Spese Fisse</h4>
+                    <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2.5">{t('Breakdown Spese Fisse')}</h4>
                     <div className="space-y-2">
                       {Object.entries(config.expenses || {}).map(([key, exp]: [string, any]) => {
                         const Icon = EXPENSE_ICONS[exp.icon] || Home;
@@ -3097,7 +3162,7 @@ export default function PersonalFinanceDashboard() {
                         );
                       })}
                       <div className="flex justify-between p-2 text-xs font-bold text-slate-900 dark:text-slate-100 border-t border-dashed border-slate-200 dark:border-slate-700">
-                        <span>Totale Spese Fisse</span>
+                        <span>{t('Totale Spese Fisse')}</span>
                         <span className="tabular-nums">{fmt(totalFixedExpenses)}/mese</span>
                       </div>
                     </div>
@@ -3105,7 +3170,7 @@ export default function PersonalFinanceDashboard() {
 
                   {/* Spese Variabili */}
                   <div>
-                    <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2.5">Breakdown Spese Variabili</h4>
+                    <h4 className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2.5">{t('Breakdown Spese Variabili')}</h4>
                     <div className="space-y-2">
                       {Object.entries(config.variableExpenses || {}).map(([key, exp]: [string, any]) => (
                         <div key={key} className="flex items-center justify-between p-2 rounded-lg bg-slate-50 dark:bg-slate-800/30 border border-slate-100 dark:border-slate-800">
@@ -3114,7 +3179,7 @@ export default function PersonalFinanceDashboard() {
                         </div>
                       ))}
                       <div className="flex justify-between p-2 text-xs font-bold text-slate-900 dark:text-slate-100 border-t border-dashed border-slate-200 dark:border-slate-700">
-                        <span>Totale Spese Variabili</span>
+                        <span>{t('Totale Spese Variabili')}</span>
                         <span className="tabular-nums">{fmt(totalVariableExpenses)}/mese</span>
                       </div>
                     </div>
@@ -3132,14 +3197,14 @@ export default function PersonalFinanceDashboard() {
             return (
               <div className="space-y-6">
                 <Card>
-                  <CardHeader title="Il tuo Portafoglio ETF" icon={BarChart3} accentColor="blue" />
+                  <CardHeader title={t('Il tuo Portafoglio ETF')} icon={BarChart3} accentColor="blue" />
                   <div className="p-8 text-center max-w-lg mx-auto">
                     <div className="w-12 h-12 bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400 rounded-2xl flex items-center justify-center mx-auto mb-4">
                       <BarChart3 size={24} />
                     </div>
-                    <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">Nessun ETF configurato</h3>
+                    <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{t('Nessun ETF configurato')}</h3>
                     <p className="text-xs text-slate-500 mt-2 leading-relaxed">
-                      Il tuo portafoglio PAC è attualmente vuoto. Per tracciare i tuoi investimenti, calcolare il drift di allocazione e monitorare l'andamento di mercato, configura i tuoi ETF nelle Impostazioni.
+                      {t("Il tuo portafoglio PAC è attualmente vuoto. Per tracciare i tuoi investimenti, calcolare il drift di allocazione e monitorare l'andamento di mercato, configura i tuoi ETF nelle Impostazioni.")}
                     </p>
                     <Button variant="primary" className="mt-5" onClick={() => setTab('settings')}>
                       Configura PAC & Strumenti
@@ -3173,43 +3238,43 @@ export default function PersonalFinanceDashboard() {
           return (
             <div className="space-y-5">
               <Card>
-                <CardHeader title="Posizioni di mercato"
-                  subtitle={hasPerInstrument ? 'Tracking per singolo strumento attivo' : 'Aggiorna almeno un valore per attivare il tracking per-strumento e il drift'}
+                <CardHeader title={t('Posizioni di mercato')}
+                  subtitle={hasPerInstrument ? t('Tracking per singolo strumento attivo') : t('Aggiorna almeno un valore per attivare il tracking per-strumento e il drift')}
                   icon={Edit3} accentColor="slate" />
                 <div className="px-5 pb-5">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
                     <div>
                       <div className="flex items-center justify-between mb-1.5">
-                        <label className="text-xs text-slate-500 font-medium">ETF aggregato (fallback)</label>
+                        <label className="text-xs text-slate-500 font-medium">{t('ETF aggregato (fallback)')}</label>
                         {state.etfValueUpdatedAt && (
                           <span className={`text-[10px] ${isStale(state.etfValueUpdatedAt, 60) ? 'text-amber-600 font-medium' : 'text-slate-400'}`}>
-                            {isStale(state.etfValueUpdatedAt, 60) && '⚠ '}aggiornato {formatRelativeTime(state.etfValueUpdatedAt)}
+                            {isStale(state.etfValueUpdatedAt, 60) && '⚠ '}aggiornato {formatRelativeTime(state.etfValueUpdatedAt, t)}
                           </span>
                         )}
                       </div>
                       <MoneyInput size="lg" value={state.etfValue} onChange={v => updateState({ etfValue: safeNum(v), etfValueUpdatedAt: new Date().toISOString() })} />
-                      <p className="text-[10px] text-slate-400 mt-1">Usato se non aggiorni i singoli strumenti</p>
+                      <p className="text-[10px] text-slate-400 mt-1">{t('Usato se non aggiorni i singoli strumenti')}</p>
                     </div>
                     <div>
                       <div className="flex items-center justify-between mb-1.5">
                         <label className="text-xs text-slate-500 font-medium">{config.fonte.name || 'Previdenza'} — posizione attuale</label>
                         {state.fonteValueUpdatedAt && (
                           <span className={`text-[10px] ${isStale(state.fonteValueUpdatedAt, 180) ? 'text-amber-600 font-medium' : 'text-slate-400'}`}>
-                            {isStale(state.fonteValueUpdatedAt, 180) && '⚠ '}aggiornato {formatRelativeTime(state.fonteValueUpdatedAt)}
+                            {isStale(state.fonteValueUpdatedAt, 180) && '⚠ '}aggiornato {formatRelativeTime(state.fonteValueUpdatedAt, t)}
                           </span>
                         )}
                       </div>
                       <MoneyInput size="lg" value={state.fonteValue} onChange={v => updateState({ fonteValue: safeNum(v), fonteValueUpdatedAt: new Date().toISOString() })} />
-                      <p className="text-[10px] text-slate-400 mt-1">Aggiorna con estratto conto annuale</p>
+                      <p className="text-[10px] text-slate-400 mt-1">{t('Aggiorna con estratto conto annuale')}</p>
                     </div>
                   </div>
                   <div className="border-t border-slate-100 pt-4">
                     <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
                       <div>
-                        <p className="text-xs text-slate-500 font-medium">Tracking per-strumento (opzionale)</p>
+                        <p className="text-xs text-slate-500 font-medium">{t('Tracking per-strumento (opzionale)')}</p>
                         {state.instrumentValuesUpdatedAt && hasPerInstrument && (
                           <p className={`text-[10px] mt-0.5 ${isStale(state.instrumentValuesUpdatedAt, 30) ? 'text-amber-600 font-medium' : 'text-slate-400'}`}>
-                            {isStale(state.instrumentValuesUpdatedAt, 30) && '⚠ '}ultimo aggiornamento {formatRelativeTime(state.instrumentValuesUpdatedAt)}
+                            {isStale(state.instrumentValuesUpdatedAt, 30) && '⚠ '}ultimo aggiornamento {formatRelativeTime(state.instrumentValuesUpdatedAt, t)}
                           </p>
                         )}
                       </div>
@@ -3244,7 +3309,7 @@ export default function PersonalFinanceDashboard() {
                       <div className="mt-2 bg-amber-50 border border-amber-200 rounded-lg p-2.5 flex items-start gap-2">
                         <AlertCircle size={13} className="text-amber-600 flex-shrink-0 mt-0.5" />
                         <p className="text-[11px] text-amber-900">
-                          <strong>Tracking incompleto:</strong> compilati {filledInstruments.length}/{config.pac.instruments.length} strumenti. Drift detection disattivato per evitare calcoli falsati. Compila tutti gli strumenti oppure resetta il tracking.
+                          <strong>{t('Tracking incompleto:')}</strong> {t('compilati {done}/{total} strumenti. Drift detection disattivato per evitare calcoli falsati. Compila tutti gli strumenti oppure resetta il tracking.', { done: filledInstruments.length, total: config.pac.instruments.length })}
                         </p>
                       </div>
                     )}
@@ -3252,8 +3317,9 @@ export default function PersonalFinanceDashboard() {
                 </div>
               </Card>
 
+              {config.modules.tax && (
               <Card>
-                <CardHeader title="Fisco & Tassazione Italiana" subtitle="Calcolo imposte stimate sul patrimonio finanziario e liquidità" icon={Receipt} accentColor="emerald"
+                <CardHeader title={t('Fisco & Tassazione Italiana')} subtitle={t('Calcolo imposte stimate sul patrimonio finanziario e liquidità')} icon={Receipt} accentColor="emerald"
                   action={
                     <Button size="sm" icon={Receipt} onClick={() => setTab('tax')}>
                       Dettaglio Fisco
@@ -3262,41 +3328,41 @@ export default function PersonalFinanceDashboard() {
                 <div className="px-5 pb-5 space-y-4">
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div className="bg-slate-50 dark:bg-slate-800/40 p-3.5 rounded-xl border border-slate-100 dark:border-slate-800">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-1">Plusvalenze Latenti</span>
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-1">{t('Plusvalenze Latenti')}</span>
                       <div className="text-base font-bold text-slate-900 dark:text-slate-100 tabular-nums">
                         {fmt(fiscalData.totalGainLatent)}
                       </div>
-                      <p className="text-[9px] text-slate-400 mt-0.5">Valore attuale − Capitale versato</p>
+                      <p className="text-[9px] text-slate-400 mt-0.5">{t('Valore attuale − Capitale versato')}</p>
                     </div>
                     <div className="bg-rose-50/50 dark:bg-rose-950/20 p-3.5 rounded-xl border border-rose-100 dark:border-rose-900/30">
                       <span className="text-[10px] font-bold uppercase tracking-wider text-rose-600 dark:text-rose-400 block mb-1">Imposte Latenti Stimate ({fiscalData.details.map(d=>d.taxRate).filter((v,i,a)=>a.indexOf(v)===i).join('%/') || '26'}%)</span>
                       <div className="text-base font-bold text-rose-700 dark:text-rose-400 tabular-nums">
                         −{fmt(fiscalData.totalTaxLatent)}
                       </div>
-                      <p className="text-[9px] text-rose-600 dark:text-rose-400 mt-0.5">Dovute in caso di vendita/realizzo</p>
+                      <p className="text-[9px] text-rose-600 dark:text-rose-400 mt-0.5">{t('Dovute in caso di vendita/realizzo')}</p>
                     </div>
                     <div className="bg-emerald-50/50 dark:bg-emerald-950/20 p-3.5 rounded-xl border border-emerald-100 dark:border-emerald-900/30">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 block mb-1">Patrimonio Netto Liquidabile</span>
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 block mb-1">{t('Patrimonio Netto Liquidabile')}</span>
                       <div className="text-base font-bold text-emerald-700 dark:text-emerald-400 tabular-nums">
                         {fmt(fiscalData.liquidableNetWorth)}
                       </div>
-                      <p className="text-[9px] text-emerald-600 dark:text-emerald-400 mt-0.5">Net Worth detratte le tasse latenti</p>
+                      <p className="text-[9px] text-emerald-600 dark:text-emerald-400 mt-0.5">{t('Net Worth detratte le tasse latenti')}</p>
                     </div>
                   </div>
 
                   <div className="border-t border-slate-100 dark:border-slate-800 pt-3">
-                    <h4 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2.5">Imposta di Bollo Stimata</h4>
+                    <h4 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2.5">{t('Imposta di Bollo Stimata')}</h4>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div className="bg-slate-50 dark:bg-slate-800/30 p-3 rounded-lg border border-slate-100 dark:border-slate-800 flex justify-between items-center">
                         <div>
-                          <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">Bollo su Prodotti Finanziari (0.20%)</span>
-                          <p className="text-[10px] text-slate-400 mt-0.5">Pari al 2 per mille annuo sul valore ETF</p>
+                          <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">{t('Bollo su Prodotti Finanziari (0.20%)')}</span>
+                          <p className="text-[10px] text-slate-400 mt-0.5">{t('Pari al 2 per mille annuo sul valore ETF')}</p>
                         </div>
                         <span className="text-xs font-bold text-slate-900 dark:text-slate-100 tabular-nums">{fmt(fiscalData.bolloEtfAnnual)}/anno</span>
                       </div>
                       <div className="bg-slate-50 dark:bg-slate-800/30 p-3 rounded-lg border border-slate-100 dark:border-slate-800 flex justify-between items-center">
                         <div>
-                          <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">Bollo su Liquidità c/c (€34.20)</span>
+                          <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">{t('Bollo su Liquidità c/c (€34.20)')}</span>
                           <p className="text-[10px] text-slate-400 mt-0.5">{totalLiq > 5000 ? 'Liquidità > €5.000 (Dovuta)' : 'Liquidità ≤ €5.000 (Esente)'}</p>
                         </div>
                         <span className="text-xs font-bold text-slate-900 dark:text-slate-100 tabular-nums">{fmt(fiscalData.bolloLiqAnnual)}/anno</span>
@@ -3308,30 +3374,31 @@ export default function PersonalFinanceDashboard() {
                   <div className="bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/30 rounded-xl p-3 text-xs text-emerald-800 dark:text-emerald-300 flex items-start gap-2.5">
                     <Info size={16} className="text-emerald-600 dark:text-emerald-400 flex-shrink-0 mt-0.5" />
                     <div>
-                      <p className="font-semibold text-[10px] sm:text-[11px] uppercase tracking-wider">Note sul Calcolo Fiscale</p>
+                      <p className="font-semibold text-[10px] sm:text-[11px] uppercase tracking-wider">{t('Note sul Calcolo Fiscale')}</p>
                       <p className="text-[11px] mt-1 leading-relaxed">
-                        Le tasse latenti sono calcolate sulla plusvalenza teorica per ogni singolo strumento in base al <strong>Capitale Versato</strong> (PMC) inserito nelle Impostazioni. L'imposta di bollo è stimata su base annua. I fondi pensione come Fon.Te. hanno una tassazione separata agevolata (15% → 9%) trattenuta direttamente alla liquidazione finale e non rientrano in questo calcolo ordinario.
+                        Le tasse latenti sono calcolate sulla plusvalenza teorica per ogni singolo strumento in base al <strong>{t('Capitale Versato')}</strong> (PMC) inserito nelle Impostazioni. L'imposta di bollo è stimata su base annua. I fondi pensione come Fon.Te. hanno una tassazione separata agevolata (15% → 9%) trattenuta direttamente alla liquidazione finale e non rientrano in questo calcolo ordinario.
                       </p>
                     </div>
                   </div>
                 </div>
               </Card>
+              )}
 
               {driftAlert && (
                 <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-start gap-3">
                   <AlertCircle size={18} className="text-amber-600 flex-shrink-0 mt-0.5" />
                   <div className="flex-1">
-                    <p className="text-sm font-semibold text-amber-900">Drift di portafoglio rilevato</p>
+                    <p className="text-sm font-semibold text-amber-900">{t('Drift di portafoglio rilevato')}</p>
                     <p className="text-xs text-amber-800 mt-0.5">
-                      Almeno uno strumento è oltre 5pp dal target. Considera un ribilanciamento o un aggiustamento del PAC tattico.
+                      {t('Almeno uno strumento è oltre 5pp dal target. Considera un ribilanciamento o un aggiustamento del PAC tattico.')}
                     </p>
                   </div>
-                  <Button size="sm" onClick={() => setShowRebalance(true)}>Suggerisci</Button>
+                  <Button size="sm" onClick={() => setShowRebalance(true)}>{t('Suggerisci')}</Button>
                 </div>
               )}
 
               <Card>
-                <CardHeader title="Core Portfolio ETF"
+                <CardHeader title={t('Core Portfolio ETF')}
                   subtitle={`${fmt(effectiveEtfTotal)} totale · TER medio ${(config.pac.instruments.reduce((s,i) => s+i.ter*i.pct, 0)/100).toFixed(2)}%${hasPerInstrument ? ' · drift max ' + maxDrift.toFixed(1) + 'pp' : ''}`}
                   icon={BarChart3} accentColor="blue" />
                 <div className="px-5 pb-5 grid grid-cols-1 lg:grid-cols-[1fr_220px] gap-6 items-center">
@@ -3383,6 +3450,7 @@ export default function PersonalFinanceDashboard() {
                 </div>
               </Card>
 
+              {config.modules.pension && (<>
               <Card>
                 <CardHeader title={`${config.fonte.name || 'Fondo Pensione'} Previdenza Complementare`} subtitle={`${fmt(state.fonteValue)} · Comparto ${config.fonte.comparto}`} icon={PiggyBank} accentColor="purple" />
                 <div className="px-5 pb-5">
@@ -3402,14 +3470,14 @@ export default function PersonalFinanceDashboard() {
                   <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 flex items-start gap-2">
                     <Info size={14} className="text-blue-600 flex-shrink-0 mt-0.5" />
                     <div className="text-xs text-blue-900">
-                      <strong>Leva fiscale:</strong> Deducibilità contributi volontari Rigo E27 · Aliquota agevolata 15% → 9% in erogazione · Contributo datoriale aggiuntivo attivo.
+                      <strong>{t('Leva fiscale:')}</strong> Deducibilità contributi volontari Rigo E27 · Aliquota agevolata 15% → 9% in erogazione · Contributo datoriale aggiuntivo attivo.
                     </div>
                   </div>
                 </div>
               </Card>
 
               <Card>
-                <CardHeader title="Deducibilità Previdenziale" subtitle="Stato della deduzione e risparmio d'imposta sul Fondo Pensione" icon={Receipt} accentColor="purple"
+                <CardHeader title={t('Deducibilità Previdenziale')} subtitle={t("Stato della deduzione e risparmio d'imposta sul Fondo Pensione")} icon={Receipt} accentColor="purple"
                   action={
                     <Button size="sm" icon={Receipt} onClick={() => setTab('tax')}>
                       Gestisci in Fisco (TAX)
@@ -3418,11 +3486,11 @@ export default function PersonalFinanceDashboard() {
                 <div className="px-5 pb-5">
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-2">
                     <div className="bg-purple-50 rounded-lg p-3">
-                      <div className="text-[10px] font-semibold uppercase tracking-wider text-purple-600 mb-1">Aliquota IRPEF</div>
+                      <div className="text-[10px] font-semibold uppercase tracking-wider text-purple-600 mb-1">{t('Aliquota IRPEF')}</div>
                       <div className="text-sm font-semibold text-slate-900">{fonteDeducibility ? `${fonteDeducibility.marginalRate}%` : 'N/D'}</div>
                     </div>
                     <div className="bg-purple-50 rounded-lg p-3">
-                      <div className="text-[10px] font-semibold uppercase tracking-wider text-purple-600 mb-1">Contributi Versati</div>
+                      <div className="text-[10px] font-semibold uppercase tracking-wider text-purple-600 mb-1">{t('Contributi Versati')}</div>
                       <div className="text-sm font-semibold text-slate-900">{fonteDeducibility ? fmt(fonteDeducibility.totalAderente) : 'N/D'}</div>
                     </div>
                     <div className="bg-purple-50 rounded-lg p-3">
@@ -3430,7 +3498,7 @@ export default function PersonalFinanceDashboard() {
                       <div className="text-sm font-semibold text-slate-900">{fonteDeducibility ? fmt(fonteDeducibility.deductible) : 'N/D'} / €5.164</div>
                     </div>
                     <div className="bg-emerald-50 rounded-lg p-3">
-                      <div className="text-[10px] font-semibold uppercase tracking-wider text-emerald-600 mb-1">Credito d'Imposta</div>
+                      <div className="text-[10px] font-semibold uppercase tracking-wider text-emerald-600 mb-1">{t("Credito d'Imposta")}</div>
                       <div className="text-sm font-semibold text-emerald-700">{fonteDeducibility ? fmt(fonteDeducibility.taxSaving) : 'N/D'}</div>
                     </div>
                   </div>
@@ -3441,6 +3509,7 @@ export default function PersonalFinanceDashboard() {
                   )}
                 </div>
               </Card>
+              </>)}
 
               {/* Rebalancing modal */}
               {showRebalance && (
@@ -3448,8 +3517,8 @@ export default function PersonalFinanceDashboard() {
                   <div className="bg-white rounded-2xl border border-slate-200 max-w-md w-full p-5 shadow-xl" onClick={e => e.stopPropagation()}>
                     <div className="flex items-start justify-between mb-3">
                       <div>
-                        <h3 className="text-base font-semibold text-slate-900">Suggerimento ribilanciamento</h3>
-                        <p className="text-xs text-slate-500 mt-0.5">Allocazione PAC tattica per ridurre il drift</p>
+                        <h3 className="text-base font-semibold text-slate-900">{t('Suggerimento ribilanciamento')}</h3>
+                        <p className="text-xs text-slate-500 mt-0.5">{t('Allocazione PAC tattica per ridurre il drift')}</p>
                       </div>
                       <button onClick={() => setShowRebalance(false)} className="text-slate-400 hover:text-slate-700">
                         <X size={18} />
@@ -3473,10 +3542,10 @@ export default function PersonalFinanceDashboard() {
                     </div>
                     <div className="bg-blue-50 border border-blue-200 rounded-lg p-2.5 mb-3">
                       <p className="text-[11px] text-blue-900">
-                        <strong>Approccio dolce:</strong> mantieni il PAC fisso e usa l'overflow (Liv.4) per acquisti tattici sugli strumenti sottopesati. Evita vendite per non innescare tassazione.
+                        <strong>{t('Approccio dolce:')}</strong> {t("mantieni il PAC fisso e usa l'overflow (Liv.4) per acquisti tattici sugli strumenti sottopesati. Evita vendite per non innescare tassazione.")}
                       </p>
                     </div>
-                    <Button variant="primary" className="w-full" onClick={() => setShowRebalance(false)}>Ho capito</Button>
+                    <Button variant="primary" className="w-full" onClick={() => setShowRebalance(false)}>{t('Ho capito')}</Button>
                   </div>
                 </div>
               )}
@@ -3485,7 +3554,7 @@ export default function PersonalFinanceDashboard() {
         })()}
 
         {/* ═══════════ FISCO (TAX) ═══════════ */}
-        {tab === 'tax' && (() => {
+        {tab === 'tax' && config.modules.tax && (() => {
           // Per-instrument tracking (riusa i totali già memoizzati in fiscalData)
           const instrumentValues = state.instrumentValues || {};
           const { hasPerInstrument, effectiveEtfTotal } = fiscalData;
@@ -3504,45 +3573,45 @@ export default function PersonalFinanceDashboard() {
               {/* Sezione Tasse Latenti e Patrimonio Liquidabile */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                 <Card>
-                  <CardHeader title="Fisco & Tasse Latenti" subtitle="Plusvalenze e imposte latenti stimate sul patrimonio ETF" icon={Receipt} accentColor="emerald" />
+                  <CardHeader title={t('Fisco & Tasse Latenti')} subtitle={t('Plusvalenze e imposte latenti stimate sul patrimonio ETF')} icon={Receipt} accentColor="emerald" />
                   <div className="px-5 pb-5 space-y-4">
                     <div className="grid grid-cols-3 gap-2">
                       <div className="bg-slate-50 dark:bg-slate-800/40 p-3.5 rounded-xl border border-slate-100 dark:border-slate-800">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-1">Plusvalenze Latenti</span>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-1">{t('Plusvalenze Latenti')}</span>
                         <div className="text-sm sm:text-base font-bold text-slate-900 dark:text-slate-100 tabular-nums">
                           {fmt(fiscalData.totalGainLatent)}
                         </div>
-                        <p className="text-[9px] text-slate-400 mt-0.5">Valore attuale − PMC</p>
+                        <p className="text-[9px] text-slate-400 mt-0.5">{t('Valore attuale − PMC')}</p>
                       </div>
                       <div className="bg-rose-50/50 dark:bg-rose-950/20 p-3.5 rounded-xl border border-rose-100 dark:border-rose-900/30">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-rose-600 dark:text-rose-400 block mb-1">Imposte Latenti</span>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-rose-600 dark:text-rose-400 block mb-1">{t('Imposte Latenti')}</span>
                         <div className="text-sm sm:text-base font-bold text-rose-700 dark:text-rose-400 tabular-nums">
                           −{fmt(fiscalData.totalTaxLatent)}
                         </div>
-                        <p className="text-[9px] text-rose-600 dark:text-rose-400 mt-0.5">Stimate al realizzo</p>
+                        <p className="text-[9px] text-rose-600 dark:text-rose-400 mt-0.5">{t('Stimate al realizzo')}</p>
                       </div>
                       <div className="bg-emerald-50/50 dark:bg-emerald-950/20 p-3.5 rounded-xl border border-emerald-100 dark:border-emerald-900/30">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 block mb-1">Patrimonio Liquidabile</span>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 block mb-1">{t('Patrimonio Liquidabile')}</span>
                         <div className="text-sm sm:text-base font-bold text-emerald-700 dark:text-emerald-400 tabular-nums">
                           {fmt(fiscalData.liquidableNetWorth)}
                         </div>
-                        <p className="text-[9px] text-emerald-600 dark:text-emerald-400 mt-0.5">Netto tasse latenti</p>
+                        <p className="text-[9px] text-emerald-600 dark:text-emerald-400 mt-0.5">{t('Netto tasse latenti')}</p>
                       </div>
                     </div>
 
                     <div className="border-t border-slate-100 dark:border-slate-800 pt-3">
-                      <h4 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2.5">Imposta di Bollo Stimata (Italia)</h4>
+                      <h4 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-2.5">{t('Imposta di Bollo Stimata (Italia)')}</h4>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div className="bg-slate-50 dark:bg-slate-800/30 p-3 rounded-lg border border-slate-100 dark:border-slate-800 flex justify-between items-center">
                           <div>
-                            <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">Bollo Strumenti Finanziari (0.20%)</span>
-                            <p className="text-[10px] text-slate-400 mt-0.5">Pari al 2‰ annuo sul portafoglio</p>
+                            <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">{t('Bollo Strumenti Finanziari (0.20%)')}</span>
+                            <p className="text-[10px] text-slate-400 mt-0.5">{t('Pari al 2‰ annuo sul portafoglio')}</p>
                           </div>
                           <span className="text-xs font-bold text-slate-900 dark:text-slate-100 tabular-nums">{fmt(fiscalData.bolloEtfAnnual)}/anno</span>
                         </div>
                         <div className="bg-slate-50 dark:bg-slate-800/30 p-3 rounded-lg border border-slate-100 dark:border-slate-800 flex justify-between items-center">
                           <div>
-                            <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">Bollo Liquidità c/c (€34.20)</span>
+                            <span className="text-xs font-semibold text-slate-800 dark:text-slate-200">{t('Bollo Liquidità c/c (€34.20)')}</span>
                             <p className="text-[10px] text-slate-400 mt-0.5">{totalLiq > 5000 ? 'Liquidità > €5.000 (Dovuta)' : 'Liquidità ≤ €5.000 (Esente)'}</p>
                           </div>
                           <span className="text-xs font-bold text-slate-900 dark:text-slate-100 tabular-nums">{fmt(fiscalData.bolloLiqAnnual)}/anno</span>
@@ -3554,10 +3623,10 @@ export default function PersonalFinanceDashboard() {
 
                 {/* ETF Fiscal Configuration Box */}
                 <Card>
-                  <CardHeader title="Configurazione Fiscale Strumenti" subtitle="Definisci PMC / Capitale Versato e Aliquota Fiscale per ciascun ETF" icon={SettingsIcon} accentColor="blue" />
+                  <CardHeader title={t('Configurazione Fiscale Strumenti')} subtitle={t('Definisci PMC / Capitale Versato e Aliquota Fiscale per ciascun ETF')} icon={SettingsIcon} accentColor="blue" />
                   <div className="px-5 pb-5 space-y-3.5 max-h-[300px] overflow-y-auto custom-scrollbar">
                     {config.pac.instruments.length === 0 ? (
-                      <p className="text-xs text-slate-400 italic text-center py-4">Nessuno strumento nel PAC da configurare.</p>
+                      <p className="text-xs text-slate-400 italic text-center py-4">{t('Nessuno strumento nel PAC da configurare.')}</p>
                     ) : (
                       config.pac.instruments.map((ins, idx) => (
                         <div key={ins.id} className="p-3 bg-slate-50 dark:bg-slate-800/30 border border-slate-100 dark:border-slate-800 rounded-xl space-y-2">
@@ -3570,7 +3639,7 @@ export default function PersonalFinanceDashboard() {
                           </div>
                           <div className="grid grid-cols-2 gap-2">
                             <div>
-                              <label className="text-[10px] font-semibold text-slate-500 uppercase block mb-1">Capitale Versato (PMC)</label>
+                              <label className="text-[10px] font-semibold text-slate-500 uppercase block mb-1">{t('Capitale Versato (PMC)')}</label>
                               <MoneyInput size="sm"
                                 value={ins.investedCapital || ''}
                                 onChange={v => {
@@ -3580,7 +3649,7 @@ export default function PersonalFinanceDashboard() {
                                 }} />
                             </div>
                             <div>
-                              <label className="text-[10px] font-semibold text-slate-500 uppercase block mb-1">Aliquota Fiscale</label>
+                              <label className="text-[10px] font-semibold text-slate-500 uppercase block mb-1">{t('Aliquota Fiscale')}</label>
                               <select value={ins.taxRate !== undefined ? ins.taxRate : 26}
                                 onChange={e => {
                                   const newIns = [...config.pac.instruments];
@@ -3588,8 +3657,8 @@ export default function PersonalFinanceDashboard() {
                                   updateConfig({ pac: { ...config.pac, instruments: newIns } });
                                 }}
                                 className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded-lg bg-white dark:bg-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-300">
-                                <option value={26}>26% (Azioni/ETF standard)</option>
-                                <option value={12.5}>12.5% (Whitelist / Titoli Stato)</option>
+                                <option value={26}>{t('26% (Azioni/ETF standard)')}</option>
+                                <option value={12.5}>{t('12.5% (Whitelist / Titoli Stato)')}</option>
                               </select>
                             </div>
                           </div>
@@ -3601,8 +3670,9 @@ export default function PersonalFinanceDashboard() {
               </div>
 
               {/* Deducibilità Fiscale Fondo Pensione */}
+              {config.modules.pension && (
               <Card>
-                <CardHeader title={`Deducibilità Fiscale ${config.fonte.name || 'Fondo'} — Rigo E27`} subtitle="Ottimizzazione deducibilità fiscale e importazione versamenti" icon={Receipt} accentColor="emerald"
+                <CardHeader title={`Deducibilità Fiscale ${config.fonte.name || 'Fondo'} — Rigo E27`} subtitle={t('Ottimizzazione deducibilità fiscale e importazione versamenti')} icon={Receipt} accentColor="emerald"
                   action={
                     <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
                       <Button size="sm" icon={Upload} onClick={() => {
@@ -3614,7 +3684,7 @@ export default function PersonalFinanceDashboard() {
                       <Button size="sm" icon={Plus} variant="primary" onClick={() => {
                         setNewContrib({ year: cy, quarter: 1, aderente: '', azienda: '', tfr: '', volontario: '', welfare: '' });
                         setShowAddContrib(true);
-                      }}>Aggiungi contributo</Button>
+                      }}>{t('Aggiungi contributo')}</Button>
                       <input id="fonte-file-input-tax" type="file" accept=".xlsx, .xls, .csv" onChange={e => {
                         const file = e.target.files?.[0];
                         if (file) importFonteExcel(file);
@@ -3625,42 +3695,42 @@ export default function PersonalFinanceDashboard() {
                 <div className="px-5 pb-5">
                   <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 mb-5">
                     <div className="bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700 rounded-xl p-3.5">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-1">Reddito Lordo (RAL)</span>
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-1">{t('Reddito Lordo (RAL)')}</span>
                       <div className="flex items-center gap-1.5">
                         <span className="text-xs text-slate-400">€</span>
                         <input type="number" value={config.salary?.ral || ''}
-                          placeholder="es. 35000"
+                          placeholder={t('es. 35000')}
                           onChange={e => updateConfig({ salary: { ...config.salary, ral: safeNum(e.target.value) } })}
                           className="w-full bg-transparent border-b border-dashed border-slate-300 font-semibold text-slate-900 dark:text-slate-100 focus:outline-none focus:border-emerald-500 text-sm py-0.5 tabular-nums" />
                       </div>
                     </div>
                     <div className="bg-emerald-50/50 border border-emerald-100 rounded-xl p-3.5">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 block mb-1">Aliquota Marginale IRPEF</span>
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 block mb-1">{t('Aliquota Marginale IRPEF')}</span>
                       <div className="text-base font-bold text-emerald-800 tabular-nums">
                         {fonteDeducibility ? `${fonteDeducibility.marginalRate}%` : 'N/D'}
                       </div>
-                      <p className="text-[9px] text-emerald-600 mt-0.5">Scaglione IRPEF rilevato</p>
+                      <p className="text-[9px] text-emerald-600 mt-0.5">{t('Scaglione IRPEF rilevato')}</p>
                     </div>
                     <div className="bg-purple-50/50 border border-purple-100 rounded-xl p-3.5">
                       <span className="text-[10px] font-bold uppercase tracking-wider text-purple-600 block mb-1">Contributi Aderente ({cy})</span>
                       <div className="text-base font-bold text-purple-800 tabular-nums">
                         {fonteDeducibility ? fmt(fonteDeducibility.totalAderente) : 'N/D'}
                       </div>
-                      <p className="text-[9px] text-purple-600 mt-0.5">Aderente + Volontario</p>
+                      <p className="text-[9px] text-purple-600 mt-0.5">{t('Aderente + Volontario')}</p>
                     </div>
                     <div className="bg-blue-50/50 border border-blue-100 rounded-xl p-3.5">
                       <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600 block mb-1">Risparmio Fiscale {cy}</span>
                       <div className="text-lg font-extrabold text-blue-800 tabular-nums">
                         {fonteDeducibility ? fmt(fonteDeducibility.taxSaving) : 'N/D'}
                       </div>
-                      <p className="text-[9px] text-blue-600 mt-0.5">Credito d'imposta stimato</p>
+                      <p className="text-[9px] text-blue-600 mt-0.5">{t("Credito d'imposta stimato")}</p>
                     </div>
                   </div>
 
                   {fonteDeducibility && (
                     <div className="mb-4">
                       <div className="flex items-center justify-between text-xs text-slate-500 mb-1">
-                        <span>Cap deducibilità fiscale (€5.164,57)</span>
+                        <span>{t('Cap deducibilità fiscale (€5.164,57)')}</span>
                         <span className="tabular-nums">{fonteDeducibility.deductible.toFixed(2)} / €5.164,57</span>
                       </div>
                       <ProgressBar value={fonteDeducibility.deductible} max={5164.57} color="#10b981" height={6} />
@@ -3669,11 +3739,11 @@ export default function PersonalFinanceDashboard() {
 
                   {/* Manual Override Option */}
                   <div className="bg-slate-50 dark:bg-slate-800/40 rounded-xl p-3 mb-5 border border-slate-100 dark:border-slate-800 flex items-center justify-between flex-wrap gap-2">
-                    <span className="text-xs font-medium text-slate-600 dark:text-slate-400">Override manuale deducibilità annua (€)</span>
+                    <span className="text-xs font-medium text-slate-600 dark:text-slate-400">{t('Override manuale deducibilità annua (€)')}</span>
                     <div className="flex items-center gap-2">
                       <input type="number"
                         value={config.fonte.annualDeductibleOverride ?? ''}
-                        placeholder="Nessuno"
+                        placeholder={t('Nessuno')}
                         onChange={e => {
                           const val = e.target.value === '' ? null : safeNum(e.target.value);
                           updateConfig({ fonte: { ...config.fonte, annualDeductibleOverride: val } });
@@ -3681,7 +3751,7 @@ export default function PersonalFinanceDashboard() {
                         className="w-24 px-2 py-1 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white dark:bg-slate-900 tabular-nums" />
                       {config.fonte.annualDeductibleOverride != null && (
                         <button onClick={() => updateConfig({ fonte: { ...config.fonte, annualDeductibleOverride: null } })}
-                          className="text-[10px] text-rose-600 hover:underline">Resetta</button>
+                          className="text-[10px] text-rose-600 hover:underline">{t('Resetta')}</button>
                       )}
                     </div>
                   </div>
@@ -3692,21 +3762,21 @@ export default function PersonalFinanceDashboard() {
                     <table className="w-full text-xs text-left" style={{ minWidth: 600 }}>
                       <thead className="bg-slate-50 dark:bg-slate-800 text-slate-500 uppercase font-semibold text-[10px] border-b border-slate-200 dark:border-slate-800">
                         <tr>
-                          <th className="py-2 px-3">Periodo</th>
-                          <th className="py-2 px-3 text-right">Aderente</th>
-                          <th className="py-2 px-3 text-right">Azienda</th>
-                          <th className="py-2 px-3 text-right">TFR</th>
-                          <th className="py-2 px-3 text-right">Volontario</th>
-                          <th className="py-2 px-3 text-right">Welfare</th>
-                          <th className="py-2 px-3 text-right">Totale</th>
-                          <th className="py-2 px-3 text-center">Azione</th>
+                          <th className="py-2 px-3">{t('Periodo')}</th>
+                          <th className="py-2 px-3 text-right">{t('Aderente')}</th>
+                          <th className="py-2 px-3 text-right">{t('Azienda')}</th>
+                          <th className="py-2 px-3 text-right">{t('TFR')}</th>
+                          <th className="py-2 px-3 text-right">{t('Volontario')}</th>
+                          <th className="py-2 px-3 text-right">{t('Welfare')}</th>
+                          <th className="py-2 px-3 text-right">{t('Totale')}</th>
+                          <th className="py-2 px-3 text-center">{t('Azione')}</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                         {(config.fonte?.contributions || []).length === 0 ? (
                           <tr>
                             <td colSpan={8} className="py-6 text-center text-slate-400">
-                              Nessun contributo inserito. Clicca su "Aggiungi contributo" o "Importa Excel" per iniziare.
+                              {t('Nessun contributo inserito. Clicca su "Aggiungi contributo" o "Importa Excel" per iniziare.')}
                             </td>
                           </tr>
                         ) : (
@@ -3738,12 +3808,13 @@ export default function PersonalFinanceDashboard() {
                   </div>
                 </div>
               </Card>
+              )}
             </div>
           );
         })()}
 
         {/* ═══════════ FIRE ═══════════ */}
-        {tab === 'fire' && (
+        {tab === 'fire' && config.modules.fire && (
           <div className="space-y-5">
             {fireProgress && (
               <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
@@ -3758,7 +3829,7 @@ export default function PersonalFinanceDashboard() {
                     </svg>
                     <div className="absolute text-center">
                       <span className="text-3xl font-extrabold text-orange-600 tabular-nums">{fireProgress.progress.toFixed(1)}%</span>
-                      <p className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">verso FIRE</p>
+                      <p className="text-[10px] uppercase font-bold text-slate-500 tracking-wider">{t('verso FIRE')}</p>
                     </div>
                   </div>
                   <div className="mt-4">
@@ -3770,34 +3841,34 @@ export default function PersonalFinanceDashboard() {
                 <div className="md:col-span-2 space-y-4">
                   <div className="grid grid-cols-2 gap-3">
                     <div className="bg-white rounded-xl border border-slate-200 p-4">
-                      <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Mancano al target</span>
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">{t('Mancano al target')}</span>
                       <div className="text-xl sm:text-2xl font-bold text-slate-900 mt-1 tabular-nums">{fmt(fireProgress.remaining)}</div>
                       <p className="text-xs text-slate-500 mt-1">Versamenti mensili: {fmt(config.pac.monthlyAmount + config.fonte.monthlyContribution)}</p>
                     </div>
                     <div className="bg-white rounded-xl border border-slate-200 p-4">
-                      <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Tempo stimato</span>
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">{t('Tempo stimato')}</span>
                       <div className="text-xl sm:text-2xl font-bold text-orange-600 mt-1 tabular-nums">
                         {fireProgress.months >= 600 ? '50+ anni' : `~${(fireProgress.months / 12).toFixed(1)} anni`}
                       </div>
-                      <p className="text-xs text-slate-500 mt-1">{fireProgress.months} mesi residui stimati</p>
+                      <p className="text-xs text-slate-500 mt-1">{t('{n} mesi residui stimati', { n: fireProgress.months })}</p>
                     </div>
                   </div>
 
                   <Card className="p-4">
                     <div className="flex items-start justify-between gap-3 mb-2">
                       <div>
-                        <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider">Coast FIRE Progress</h4>
-                        <p className="text-[11px] text-slate-500 mt-0.5">Patrimonio target necessario oggi a {fireProgress.currentAge} anni: <strong>{fmt(fireProgress.coastFire)}</strong></p>
+                        <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider">{t('Coast FIRE Progress')}</h4>
+                        <p className="text-[11px] text-slate-500 mt-0.5">{t('Patrimonio target necessario oggi a {age} anni:', { age: fireProgress.currentAge })} <strong>{fmt(fireProgress.coastFire)}</strong></p>
                       </div>
                       <span className="text-sm font-extrabold text-indigo-600 tabular-nums">{fireProgress.coastProgress.toFixed(1)}%</span>
                     </div>
                     <ProgressBar value={netWorth} max={fireProgress.coastFire} color="#6366f1" height={8} />
                     <p className="text-[10px] text-slate-400 mt-2">
-                      Il Coast FIRE misura se il patrimonio attuale, lasciato crescere al{' '}
+                      {t('Il Coast FIRE misura se il patrimonio attuale, lasciato crescere al')}{' '}
                       <strong>
                         {(state.fireParams.rate - config.expectedInflationRate).toFixed(1)}% reale
                       </strong>{' '}
-                      senza altri contributi, raggiungerà il target FIRE all'età di <strong>{state.fireParams.retireAge} anni</strong>.
+                      {t("senza altri contributi, raggiungerà il target FIRE all'età di")} <strong>{t('{age} anni', { age: state.fireParams.retireAge })}</strong>.
                     </p>
                   </Card>
                 </div>
@@ -3805,7 +3876,7 @@ export default function PersonalFinanceDashboard() {
             )}
 
             <Card>
-              <CardHeader title="Scenari FIRE interattivi" subtitle={`PAC ${fmt(config.pac.monthlyAmount)}/mese · ${config.fonte.name || 'Previdenza'} ${fmt(config.fonte.monthlyContribution)}/mese`} icon={Flame} accentColor="orange" />
+              <CardHeader title={t('Scenari FIRE interattivi')} subtitle={`PAC ${fmt(config.pac.monthlyAmount)}/mese · ${config.fonte.name || 'Previdenza'} ${fmt(config.fonte.monthlyContribution)}/mese`} icon={Flame} accentColor="orange" />
               <div className="px-5 pb-5">
                 
                 <div className="flex justify-between items-center bg-slate-50 dark:bg-slate-800/40 p-3.5 rounded-2xl border border-slate-100 dark:border-slate-800 mb-5 flex-wrap gap-2">
@@ -3815,7 +3886,7 @@ export default function PersonalFinanceDashboard() {
                       Proiezioni in Termini Reali:
                     </span>
                     <span className="text-xs text-slate-600 dark:text-slate-400">
-                      Tutti i rendimenti futuri sono depurati in tempo reale dall'inflazione attesa per mostrarti il potere d'acquisto effettivo.
+                      {t("Tutti i rendimenti futuri sono depurati in tempo reale dall'inflazione attesa per mostrarti il potere d'acquisto effettivo.")}
                     </span>
                   </div>
                 </div>
@@ -3901,16 +3972,16 @@ export default function PersonalFinanceDashboard() {
             </Card>
 
             <Card>
-              <CardHeader title="Rendita stimata · SWR 4%" subtitle="Tasso di prelievo sicuro applicato al PAC" icon={Target} accentColor="emerald" />
+              <CardHeader title={t('Rendita stimata · SWR 4%')} subtitle={t('Tasso di prelievo sicuro applicato al PAC')} icon={Target} accentColor="emerald" />
               <div className="px-5 pb-5 overflow-x-auto">
                 <table className="w-full text-sm" style={{ minWidth: 480 }}>
                   <thead>
                     <tr className="border-b border-slate-200">
-                      <th className="text-left py-2.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Scenario</th>
+                      <th className="text-left py-2.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">{t('Scenario')}</th>
                       <th className="text-right py-2.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">PAC a {state.fireParams.retireAge}a</th>
-                      <th className="text-right py-2.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Rendita</th>
+                      <th className="text-right py-2.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">{t('Rendita')}</th>
                       <th className="text-right py-2.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">PAC a {state.fireParams.retireAge + 5}a</th>
-                      <th className="text-right py-2.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Rendita</th>
+                      <th className="text-right py-2.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">{t('Rendita')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -3934,7 +4005,7 @@ export default function PersonalFinanceDashboard() {
             </Card>
 
             <Card>
-              <CardHeader title="Roadmap milestone" subtitle="Sentiero di accumulo 2027 → 2049" icon={Flag} accentColor="indigo" />
+              <CardHeader title={t('Roadmap milestone')} subtitle={t('Sentiero di accumulo 2027 → 2049')} icon={Flag} accentColor="indigo" />
               <div className="px-5 pb-5">
                 <div className="relative">
                   <div className="absolute left-3 top-2 bottom-2 w-px bg-slate-200" />
@@ -3950,9 +4021,9 @@ export default function PersonalFinanceDashboard() {
                               <div className="min-w-0 flex-1">
                                 <div className="flex items-center gap-2 flex-wrap">
                                   <p className="text-sm font-semibold text-slate-900">{ms.label}</p>
-                                  {reached && <Badge color="emerald" icon={Check}>Raggiunto</Badge>}
+                                  {reached && <Badge color="emerald" icon={Check}>{t('Raggiunto')}</Badge>}
                                 </div>
-                                <p className="text-[11px] text-slate-500 mt-0.5">{ms.year} · {ms.age} anni · {ms.note}</p>
+                                <p className="text-[11px] text-slate-500 mt-0.5">{ms.year} · {t('{age} anni', { age: ms.age })} · {ms.note}</p>
                               </div>
                               <div className="text-right flex-shrink-0">
                                 <p className="text-sm font-semibold text-slate-900 tabular-nums">{fmtK(ms.pacT)}</p>
@@ -3961,7 +4032,7 @@ export default function PersonalFinanceDashboard() {
                             </div>
                             <div className="mt-2">
                               <div className="flex justify-between text-[10px] text-slate-500 mb-1">
-                                <span>Progresso PAC</span>
+                                <span>{t('Progresso PAC')}</span>
                                 <span className="tabular-nums">{(prog * 100).toFixed(1)}%</span>
                               </div>
                               <ProgressBar value={state.etfValue} max={ms.pacT} color={ms.isTarget ? '#f97316' : '#10b981'} height={4} />
@@ -4003,24 +4074,24 @@ export default function PersonalFinanceDashboard() {
           return (
             <div className="space-y-5">
               <Card>
-                <CardHeader title="Cash flow mensile"
-                  subtitle={`${MONTHS_IT[targetMonth]} ${targetYear}${targetIsBonus ? ' · mese bonus' : ''}`}
+                <CardHeader title={t('Cash flow mensile')}
+                  subtitle={`${monthName(config.language, targetMonth)} ${targetYear}${targetIsBonus ? ' · ' + t('mese bonus') : ''}`}
                   icon={TrendingUp} accentColor="emerald"
                   action={
                     <div className="flex items-center gap-1">
                       <Button size="xs" icon={ChevronLeft} onClick={() => setCashflowMonth(cashflowMonth - 1)} />
                       <span className="text-xs text-slate-500 px-2 tabular-nums">{cashflowMonth === 0 ? 'attuale' : cashflowMonth > 0 ? `+${cashflowMonth}` : cashflowMonth}</span>
                       <Button size="xs" icon={ChevronRight} onClick={() => setCashflowMonth(Math.min(cashflowMonth + 1, 12))} disabled={cashflowMonth >= 12} />
-                      {cashflowMonth !== 0 && <Button size="xs" onClick={() => setCashflowMonth(0)}>Oggi</Button>}
+                      {cashflowMonth !== 0 && <Button size="xs" onClick={() => setCashflowMonth(0)}>{t('Oggi')}</Button>}
                     </div>
                   } />
                 <div className="px-5 pb-5">
                   <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
                     <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3">
                       <div className="flex items-center justify-between mb-1">
-                        <div className="text-[10px] font-semibold uppercase tracking-wider text-emerald-700">Entrate</div>
+                        <div className="text-[10px] font-semibold uppercase tracking-wider text-emerald-700">{t('Entrate')}</div>
                         {!isFuture && !targetSalDone && (
-                          <span className="text-[9px] text-amber-700 font-medium px-1.5 py-0.5 bg-amber-100 rounded">non conf.</span>
+                          <span className="text-[9px] text-amber-700 font-medium px-1.5 py-0.5 bg-amber-100 rounded">{t('non conf.')}</span>
                         )}
                       </div>
                       <div className="text-lg font-semibold tabular-nums text-emerald-700">{fmt(projTotalIn)}</div>
@@ -4030,9 +4101,9 @@ export default function PersonalFinanceDashboard() {
                     </div>
                     <div className="bg-rose-50 border border-rose-200 rounded-xl p-3">
                       <div className="flex items-center justify-between mb-1">
-                        <div className="text-[10px] font-semibold uppercase tracking-wider text-rose-700">Uscite</div>
+                        <div className="text-[10px] font-semibold uppercase tracking-wider text-rose-700">{t('Uscite')}</div>
                         {!isFuture && !targetPacDone && (
-                          <span className="text-[9px] text-amber-700 font-medium px-1.5 py-0.5 bg-amber-100 rounded">non conf.</span>
+                          <span className="text-[9px] text-amber-700 font-medium px-1.5 py-0.5 bg-amber-100 rounded">{t('non conf.')}</span>
                         )}
                       </div>
                       <div className="text-lg font-semibold tabular-nums text-rose-700">{fmt(projTotalOut)}</div>
@@ -4041,16 +4112,16 @@ export default function PersonalFinanceDashboard() {
                       </div>
                     </div>
                     <div className={`border rounded-xl p-3 ${projNetFlow >= 0 ? 'bg-blue-50 border-blue-200' : 'bg-amber-50 border-amber-200'}`}>
-                      <div className={`text-[10px] font-semibold uppercase tracking-wider mb-1 ${projNetFlow >= 0 ? 'text-blue-700' : 'text-amber-700'}`}>Netto</div>
+                      <div className={`text-[10px] font-semibold uppercase tracking-wider mb-1 ${projNetFlow >= 0 ? 'text-blue-700' : 'text-amber-700'}`}>{t('Netto')}</div>
                       <div className={`text-lg font-semibold tabular-nums ${projNetFlow >= 0 ? 'text-blue-700' : 'text-amber-700'}`}>{projNetFlow >= 0 ? '+' : ''}{fmt(projNetFlow)}</div>
                       <div className={`text-[10px] mt-0.5 ${projNetFlow >= 0 ? 'text-blue-600' : 'text-amber-600'}`}>
-                        {isCurrentMonth || isFuture ? 'Disponibile per L4' : (targetSalDone && targetPacDone ? 'Effettivo' : 'Stimato')}
+                        {isCurrentMonth || isFuture ? t('Disponibile per L4') : (targetSalDone && targetPacDone ? t('Effettivo') : t('Stimato'))}
                       </div>
                     </div>
                     <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-3">
-                      <div className="text-[10px] font-semibold uppercase tracking-wider text-indigo-700 mb-1">Saving rate</div>
+                      <div className="text-[10px] font-semibold uppercase tracking-wider text-indigo-700 mb-1">{t('Saving rate')}</div>
                       <div className="text-lg font-semibold tabular-nums text-indigo-700">{projTotalIn > 0 ? (((config.pac.monthlyAmount + Math.max(0, projNetFlow)) / projTotalIn) * 100).toFixed(0) : 0}%</div>
-                      <div className="text-[10px] text-indigo-600 mt-0.5">PAC + surplus / entrate</div>
+                      <div className="text-[10px] text-indigo-600 mt-0.5">{t('PAC + surplus / entrate')}</div>
                     </div>
                   </div>
 
@@ -4058,14 +4129,14 @@ export default function PersonalFinanceDashboard() {
                     <div className="bg-blue-50 border border-blue-200 rounded-lg p-2.5 mb-4 flex items-start gap-2">
                       <Info size={13} className="text-blue-600 flex-shrink-0 mt-0.5" />
                       <p className="text-[11px] text-blue-900">
-                        Mese passato con eventi non confermati. I valori mostrati sono <strong>attesi sulla base della configurazione</strong>, non effettivi. Conferma gli eventi qui sotto per il tracking storico.
+                        {t('Mese passato con eventi non confermati. I valori mostrati sono')} <strong>{t('attesi sulla base della configurazione')}</strong>{t(', non effettivi. Conferma gli eventi qui sotto per il tracking storico.')}
                       </p>
                     </div>
                   )}
 
                   <div className="space-y-3">
                     <div>
-                      <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2">Eventi ricorrenti</div>
+                      <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2">{t('Eventi ricorrenti')}</div>
                       <div className="space-y-1.5">
                         <div className={`flex items-center justify-between p-2.5 rounded-lg border ${targetSalDone ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-50 border-slate-200'}`}>
                           <div className="flex items-center gap-2.5 min-w-0">
@@ -4122,16 +4193,16 @@ export default function PersonalFinanceDashboard() {
 
               {/* 12-month overview compact */}
               <Card>
-                <CardHeader title="Ultimi 12 mesi" subtitle="Visione rapida regolarità eventi" icon={HistoryIcon} accentColor="indigo" />
+                <CardHeader title={t('Ultimi 12 mesi')} subtitle={t('Visione rapida regolarità eventi')} icon={HistoryIcon} accentColor="indigo" />
                 <div className="px-5 pb-5 overflow-x-auto">
                   <table className="w-full text-sm" style={{ minWidth: 520 }}>
                     <thead>
                       <tr className="border-b border-slate-200">
-                        <th className="text-left py-2.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Mese</th>
-                        <th className="text-center py-2.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">PAC</th>
-                        <th className="text-center py-2.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Stipendio</th>
-                        <th className="text-right py-2.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Atteso</th>
-                        <th className="text-right py-2.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Note</th>
+                        <th className="text-left py-2.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">{t('Mese')}</th>
+                        <th className="text-center py-2.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">{t('PAC')}</th>
+                        <th className="text-center py-2.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">{t('Stipendio')}</th>
+                        <th className="text-right py-2.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">{t('Atteso')}</th>
+                        <th className="text-right py-2.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">{t('Note')}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -4140,7 +4211,7 @@ export default function PersonalFinanceDashboard() {
                           <td className="py-2.5 px-2">
                             <div className="flex items-center gap-2">
                               <span className="font-medium text-slate-900">{row.label}</span>
-                              {row.isCurrent && <Badge color="emerald">attuale</Badge>}
+                              {row.isCurrent && <Badge color="emerald">{t('attuale')}</Badge>}
                             </div>
                           </td>
                           <td className="py-2.5 px-2 text-center">
@@ -4166,39 +4237,39 @@ export default function PersonalFinanceDashboard() {
 
             {/* Transactions */}
             <Card>
-              <CardHeader title="Transazioni extra" subtitle="Entrate o uscite straordinarie" icon={Hash} accentColor="amber"
-                action={<Button size="sm" icon={Plus} onClick={() => setShowAddTx(!showAddTx)}>Aggiungi</Button>} />
+              <CardHeader title={t('Transazioni extra')} subtitle={t('Entrate o uscite straordinarie')} icon={Hash} accentColor="amber"
+                action={<Button size="sm" icon={Plus} onClick={() => setShowAddTx(!showAddTx)}>{t('Aggiungi')}</Button>} />
               <div className="px-5 pb-5">
                 {showAddTx && (
                   <div className="bg-slate-50 rounded-xl p-3 mb-4 grid grid-cols-1 sm:grid-cols-[1fr_1fr_2fr_auto] gap-2 items-end">
                     <div>
-                      <label className="text-[10px] font-semibold text-slate-500 uppercase block mb-1">Importo</label>
+                      <label className="text-[10px] font-semibold text-slate-500 uppercase block mb-1">{t('Importo')}</label>
                       <MoneyInput size="sm" value={newTx.amount} onChange={v => setNewTx({...newTx, amount: v})} />
                     </div>
                     <div>
-                      <label className="text-[10px] font-semibold text-slate-500 uppercase block mb-1">Tipo</label>
+                      <label className="text-[10px] font-semibold text-slate-500 uppercase block mb-1">{t('Tipo')}</label>
                       <select value={newTx.type} onChange={e => setNewTx({...newTx, type: e.target.value})}
                         className="w-full px-2.5 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white">
-                        <option value="income">Entrata</option>
-                        <option value="expense">Uscita</option>
+                        <option value="income">{t('Entrata')}</option>
+                        <option value="expense">{t('Uscita')}</option>
                       </select>
                     </div>
                     <div>
-                      <label className="text-[10px] font-semibold text-slate-500 uppercase block mb-1">Categoria + nota</label>
+                      <label className="text-[10px] font-semibold text-slate-500 uppercase block mb-1">{t('Categoria + nota')}</label>
                       <div className="flex gap-2">
                         <select value={newTx.category} onChange={e => setNewTx({...newTx, category: e.target.value})}
                           className="px-2.5 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white">
                           {EXTRA_CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.icon} {c.label}</option>)}
                         </select>
-                        <input type="text" placeholder="Nota..." value={newTx.note} onChange={e => setNewTx({...newTx, note: e.target.value})}
+                        <input type="text" placeholder={t('Nota...')} value={newTx.note} onChange={e => setNewTx({...newTx, note: e.target.value})}
                           className="flex-1 px-2.5 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white" />
                       </div>
                     </div>
-                    <Button onClick={addTransaction} variant="primary" size="md" icon={Check}>OK</Button>
+                    <Button onClick={addTransaction} variant="primary" size="md" icon={Check}>{t('OK')}</Button>
                   </div>
                 )}
                 {state.transactions.length === 0 ? (
-                  <EmptyState icon={Hash} title="Nessuna transazione extra" description="Le entrate straordinarie (lavoro extra, regali, rimborsi) e le uscite impreviste verranno mostrate qui." />
+                  <EmptyState icon={Hash} title={t('Nessuna transazione extra')} description={t('Le entrate straordinarie (lavoro extra, regali, rimborsi) e le uscite impreviste verranno mostrate qui.')} />
                 ) : (
                   <div className="space-y-1">
                     {state.transactions.map(tx => {
@@ -4229,20 +4300,20 @@ export default function PersonalFinanceDashboard() {
 
             {/* Snapshots history */}
             <Card>
-              <CardHeader title="Cronologia snapshot" subtitle={`${state.snapshots.length} registrazioni`} icon={Save} accentColor="emerald" />
+              <CardHeader title={t('Cronologia snapshot')} subtitle={`${state.snapshots.length} registrazioni`} icon={Save} accentColor="emerald" />
               <div className="px-5 pb-5">
                 {state.snapshots.length === 0 ? (
-                  <EmptyState icon={Save} title="Nessuno snapshot ancora" description="Il primo snapshot viene salvato automaticamente alla prossima apertura dell'app, una volta che hai inserito i tuoi dati." />
+                  <EmptyState icon={Save} title={t('Nessuno snapshot ancora')} description={t("Il primo snapshot viene salvato automaticamente alla prossima apertura dell'app, una volta che hai inserito i tuoi dati.")} />
                 ) : (
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm" style={{ minWidth: 480 }}>
                       <thead>
                         <tr className="border-b border-slate-200">
-                          <th className="text-left py-2.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Data</th>
-                          <th className="text-right py-2.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">ETF</th>
+                          <th className="text-left py-2.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">{t('Data')}</th>
+                          <th className="text-right py-2.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">{t('ETF')}</th>
                           <th className="text-right py-2.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">{config.fonte.name || 'Previdenza'}</th>
-                          <th className="text-right py-2.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Liquidità</th>
-                          <th className="text-right py-2.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">Netto</th>
+                          <th className="text-right py-2.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">{t('Liquidità')}</th>
+                          <th className="text-right py-2.5 px-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500">{t('Netto')}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -4288,32 +4359,32 @@ export default function PersonalFinanceDashboard() {
             <div className="space-y-5">
               {performanceData && (
                 <Card className="mb-5">
-                  <CardHeader title="Performance & Efficienza Portafoglio" subtitle="Rendimenti storici calcolati in base alla variazione degli snapshot" icon={TrendingUp} accentColor="emerald" />
+                  <CardHeader title={t('Performance & Efficienza Portafoglio')} subtitle={t('Rendimenti storici calcolati in base alla variazione degli snapshot')} icon={TrendingUp} accentColor="emerald" />
                   <div className="px-5 pb-5">
                     <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
                       <div className="bg-emerald-50/50 rounded-xl p-3.5 border border-emerald-100">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600">Rendimento Totale</span>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600">{t('Rendimento Totale')}</span>
                         <div className="text-xl sm:text-2xl font-bold text-emerald-800 mt-1 tabular-nums">
                           {performanceData.totalReturn > 0 ? '+' : ''}{performanceData.totalReturn.toFixed(2)}%
                         </div>
-                        <p className="text-[10px] text-emerald-600 mt-0.5">Dall'inizio del tracciamento</p>
+                        <p className="text-[10px] text-emerald-600 mt-0.5">{t("Dall'inizio del tracciamento")}</p>
                       </div>
                       <div className="bg-blue-50/50 rounded-xl p-3.5 border border-blue-100">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600">Performance YTD</span>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600">{t('Performance YTD')}</span>
                         <div className="text-xl sm:text-2xl font-bold text-blue-800 mt-1 tabular-nums">
                           {performanceData.ytd > 0 ? '+' : ''}{performanceData.ytd.toFixed(2)}%
                         </div>
-                        <p className="text-[10px] text-blue-600 mt-0.5">Anno corrente ({cy})</p>
+                        <p className="text-[10px] text-blue-600 mt-0.5">{t('Anno corrente ({year})', { year: cy })}</p>
                       </div>
                       <div className="bg-purple-50/50 rounded-xl p-3.5 border border-purple-100">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-purple-600">CAGR Annualizzato</span>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-purple-600">{t('CAGR Annualizzato')}</span>
                         <div className="text-xl sm:text-2xl font-bold text-purple-800 mt-1 tabular-nums">
                           {performanceData.cagr > 0 ? '+' : ''}{performanceData.cagr.toFixed(2)}%
                         </div>
-                        <p className="text-[10px] text-purple-600 mt-0.5">Tasso composto annuo</p>
+                        <p className="text-[10px] text-purple-600 mt-0.5">{t('Tasso composto annuo')}</p>
                       </div>
                       <div className="bg-slate-50 rounded-xl p-3.5 border border-slate-200">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Costo TER Annuo</span>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">{t('Costo TER Annuo')}</span>
                         <div className="text-xl sm:text-2xl font-bold text-slate-800 mt-1 tabular-nums">
                           {fmt(performanceData.annualTerCost)}
                         </div>
@@ -4323,7 +4394,7 @@ export default function PersonalFinanceDashboard() {
                     <div className="bg-slate-50 rounded-lg p-3 text-xs text-slate-500 flex items-start gap-2 border border-slate-100">
                       <Info size={14} className="text-slate-400 flex-shrink-0 mt-0.5" />
                       <p>
-                        I rendimenti mostrati sono basati esclusivamente sulla differenza tra il primo e l'ultimo snapshot storico del patrimonio netto. Non tengono conto dei singoli flussi di cassa intermedi né dei dividendi reinvestiti.
+                        {t("I rendimenti mostrati sono basati esclusivamente sulla differenza tra il primo e l'ultimo snapshot storico del patrimonio netto. Non tengono conto dei singoli flussi di cassa intermedi né dei dividendi reinvestiti.")}
                       </p>
                     </div>
                   </div>
@@ -4331,22 +4402,22 @@ export default function PersonalFinanceDashboard() {
               )}
 
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-                <StatCard label="Accumulo medio/mese" value={hasData ? fmt(avgMonthlyAccum) : 'N/D'}
-                  sub={hasData ? `Su ${timeFrameMonths.toFixed(1)} mesi tracciati` : 'Disponibile tra ~1 mese'}
+                <StatCard label={t('Accumulo medio/mese')} value={hasData ? fmt(avgMonthlyAccum) : 'N/D'}
+                  sub={hasData ? t('Su {months} mesi tracciati', { months: timeFrameMonths.toFixed(1) }) : t('Disponibile tra ~1 mese')}
                   accent="emerald" icon={ArrowUpRight} large />
-                <StatCard label="Tasso di risparmio" value={hasData ? `${savingsRate.toFixed(1)}%` : 'N/D'}
-                  sub={hasData ? `vs ${fmt(avgIncome)}/mese di reddito` : ''}
+                <StatCard label={t('Tasso di risparmio')} value={hasData ? `${savingsRate.toFixed(1)}%` : 'N/D'}
+                  sub={hasData ? t('vs {amount}/mese di reddito', { amount: fmt(avgIncome) }) : ''}
                   accent={savingsRate >= 40 ? 'emerald' : savingsRate >= 25 ? 'amber' : 'rose'} icon={PiggyBank} large />
-                <StatCard label="Crescita annualizzata" value={hasData ? `${annualGrowthPct > 0 ? '+' : ''}${annualGrowthPct.toFixed(1)}%` : 'N/D'}
+                <StatCard label={t('Crescita annualizzata')} value={hasData ? `${annualGrowthPct > 0 ? '+' : ''}${annualGrowthPct.toFixed(1)}%` : 'N/D'}
                   sub="Patrimonio netto YoY" accent={annualGrowthPct >= 15 ? 'emerald' : 'blue'} icon={TrendingUp} large />
-                <StatCard label="Prossima milestone" value={nextMilestone ? `~${monthsToNext} mesi` : 'Tutte!'}
+                <StatCard label={t('Prossima milestone')} value={nextMilestone ? `~${monthsToNext} mesi` : 'Tutte!'}
                   sub={nextMilestone ? `${fmtK(nextMilestone.pacT)} · ${nextMilestone.year}` : 'Oltre l\'ultima milestone'}
                   accent="indigo" icon={Flag} large />
               </div>
 
               <Card>
-                <CardHeader title="Traiettoria reale vs proiezione Ponderata"
-                  subtitle={hasData ? `Delta corrente: ${currentDelta >= 0 ? '+' : ''}${fmt(currentDelta)} ${currentDelta >= 0 ? '— sopra modello' : '— sotto modello'}` : 'Il confronto sarà disponibile dopo il secondo mese di utilizzo'}
+                <CardHeader title={t('Traiettoria reale vs proiezione Ponderata')}
+                  subtitle={hasData ? t('Delta corrente: {delta} {status}', { delta: `${currentDelta >= 0 ? '+' : ''}${fmt(currentDelta)}`, status: currentDelta >= 0 ? t('— sopra modello') : t('— sotto modello') }) : t('Il confronto sarà disponibile dopo il secondo mese di utilizzo')}
                   icon={Target} accentColor={hasData ? (currentDelta >= 0 ? 'emerald' : 'amber') : 'slate'} />
                 <div className="px-5 pb-5">
                   {hasData ? (
@@ -4362,20 +4433,20 @@ export default function PersonalFinanceDashboard() {
                       </LineChart>
                     </ResponsiveContainer>
                   ) : (
-                    <EmptyState icon={Target} title="Grafico disponibile dal secondo mese"
-                      description="Il tracking automatico sta raccogliendo dati. Ogni mese la curva reale si aggiorna automaticamente — non devi fare nulla." />
+                    <EmptyState icon={Target} title={t('Grafico disponibile dal secondo mese')}
+                      description={t('Il tracking automatico sta raccogliendo dati. Ogni mese la curva reale si aggiorna automaticamente — non devi fare nulla.')} />
                   )}
                 </div>
               </Card>
 
               <Card>
-                <CardHeader title="Insight automatici" subtitle="Analisi basata sui dati attuali" icon={Sparkles} accentColor="purple" />
+                <CardHeader title={t('Insight automatici')} subtitle={t('Analisi basata sui dati attuali')} icon={Sparkles} accentColor="purple" />
                 <div className="px-5 pb-5 space-y-2">
                   {!hasData && (
                     <div className="bg-blue-50 border border-blue-200 rounded-xl p-3.5 flex items-start gap-2.5">
                       <Info size={16} className="text-blue-600 flex-shrink-0 mt-0.5" />
                       <div className="text-xs text-blue-900">
-                        <strong>Tracking automatico attivo:</strong> uno snapshot viene salvato automaticamente ogni mese alla prima apertura dell'app. Dopo 2-3 mesi avrai dati significativi per analizzare l'aderenza alla traiettoria.
+                        <strong>{t('Tracking automatico attivo:')}</strong> {t("uno snapshot viene salvato automaticamente ogni mese alla prima apertura dell'app. Dopo 2-3 mesi avrai dati significativi per analizzare l'aderenza alla traiettoria.")}
                       </div>
                     </div>
                   )}
@@ -4383,7 +4454,7 @@ export default function PersonalFinanceDashboard() {
                     <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3.5 flex items-start gap-2.5">
                       <CheckCircle2 size={16} className="text-emerald-600 flex-shrink-0 mt-0.5" />
                       <div className="text-xs text-emerald-900">
-                        <strong>Tasso di risparmio eccellente ({savingsRate.toFixed(1)}%):</strong> ben oltre la media italiana (~10%) e nel range FIRE consigliato (30–50%). Continua su questo passo.
+                        <strong>{t('Tasso di risparmio eccellente ({rate}%):', { rate: savingsRate.toFixed(1) })}</strong> {t('ben oltre la media italiana (~10%) e nel range FIRE consigliato (30–50%).')} Continua su questo passo.
                       </div>
                     </div>
                   )}
@@ -4391,7 +4462,7 @@ export default function PersonalFinanceDashboard() {
                     <div className="bg-amber-50 border border-amber-200 rounded-xl p-3.5 flex items-start gap-2.5">
                       <AlertCircle size={16} className="text-amber-600 flex-shrink-0 mt-0.5" />
                       <div className="text-xs text-amber-900">
-                        <strong>Tasso di risparmio al {savingsRate.toFixed(1)}%:</strong> sotto la soglia FIRE consigliata. Verifica spese voluttuarie comprimibili o se ci sono state uscite straordinarie nel periodo.
+                        <strong>{t('Tasso di risparmio al {rate}%:', { rate: savingsRate.toFixed(1) })}</strong> {t('sotto la soglia FIRE consigliata. Verifica spese voluttuarie comprimibili o se ci sono state uscite straordinarie nel periodo.')}
                       </div>
                     </div>
                   )}
@@ -4399,7 +4470,7 @@ export default function PersonalFinanceDashboard() {
                     <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3.5 flex items-start gap-2.5">
                       <ArrowUpRight size={16} className="text-emerald-600 flex-shrink-0 mt-0.5" />
                       <div className="text-xs text-emerald-900">
-                        <strong>Sopra la traiettoria di {fmt(currentDelta)}:</strong> il rendimento o l'accumulo reale stanno superando il modello Ponderato. Eccellente progresso.
+                        <strong>{t('Sopra la traiettoria di {amount}:', { amount: fmt(currentDelta) })}</strong> {t("il rendimento o l'accumulo reale stanno superando il modello Ponderato. Eccellente progresso.")}
                       </div>
                     </div>
                   )}
@@ -4407,7 +4478,7 @@ export default function PersonalFinanceDashboard() {
                     <div className="bg-rose-50 border border-rose-200 rounded-xl p-3.5 flex items-start gap-2.5">
                       <AlertCircle size={16} className="text-rose-600 flex-shrink-0 mt-0.5" />
                       <div className="text-xs text-rose-900">
-                        <strong>Scostamento dalla traiettoria di {fmt(Math.abs(currentDelta))}:</strong> può essere volatilità di breve periodo. Se persiste oltre 6 mesi, valuta se rivedere il piano (capacità di risparmio o ipotesi di rendimento).
+                        <strong>{t('Scostamento dalla traiettoria di {amount}:', { amount: fmt(Math.abs(currentDelta)) })}</strong> {t('può essere volatilità di breve periodo. Se persiste oltre 6 mesi, valuta se rivedere il piano (capacità di risparmio o ipotesi di rendimento).')}
                       </div>
                     </div>
                   )}
@@ -4415,7 +4486,7 @@ export default function PersonalFinanceDashboard() {
                     <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-3.5 flex items-start gap-2.5">
                       <Flag size={16} className="text-indigo-600 flex-shrink-0 mt-0.5" />
                       <div className="text-xs text-indigo-900">
-                        <strong>Prossima milestone "{nextMilestone.label}":</strong> ~{monthsToNext} mesi ({(monthsToNext / 12).toFixed(1)} anni) al ritmo attuale di {fmt(config.pac.monthlyAmount)}/mese e 5.3% reale. Target ETF: {fmt(nextMilestone.pacT)} entro il {nextMilestone.year}.
+                        <strong>{t('Prossima milestone "{label}":', { label: nextMilestone.label })}</strong> {t('~{months} mesi ({years} anni) al ritmo attuale di {amount}/mese e 5.3% reale. Target ETF: {target} entro il {year}.', { months: monthsToNext, years: (monthsToNext / 12).toFixed(1), amount: fmt(config.pac.monthlyAmount), target: fmt(nextMilestone.pacT), year: nextMilestone.year })}
                       </div>
                     </div>
                   )}
@@ -4424,15 +4495,15 @@ export default function PersonalFinanceDashboard() {
 
               {compositionData && (
                 <Card className="mt-5">
-                  <CardHeader title="Composizione & Diversificazione Asset" subtitle="Ripartizione attuale e andamento storico dei tuoi pilastri patrimoniali" icon={Wallet} accentColor="indigo" />
+                  <CardHeader title={t('Composizione & Diversificazione Asset')} subtitle={t('Ripartizione attuale e andamento storico dei tuoi pilastri patrimoniali')} icon={Wallet} accentColor="indigo" />
                   <div className="px-5 pb-5">
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-6">
                       {compositionData.pie.map(item => {
                         let label = "";
                         let desc = "";
-                        if (item.name === 'ETF') { label = 'ETF (Azionario)'; desc = 'Motore di crescita'; }
-                        if (item.name !== 'ETF' && item.name !== 'Liquidità') { label = 'Previdenza'; desc = 'Ottimizzazione fiscale'; }
-                        if (item.name === 'Liquidità') { label = 'Liquidità'; desc = 'Sicurezza e operatività'; }
+                        if (item.name === 'ETF') { label = t('ETF (Azionario)'); desc = t('Motore di crescita'); }
+                        if (item.name !== 'ETF' && item.name !== 'Liquidità') { label = t('Previdenza'); desc = t('Ottimizzazione fiscale'); }
+                        if (item.name === 'Liquidità') { label = t('Liquidità'); desc = t('Sicurezza e operatività'); }
                         return (
                           <div key={item.name} className="bg-white rounded-xl border border-slate-200 p-4">
                             <div className="flex items-center gap-2 mb-1">
@@ -4441,7 +4512,7 @@ export default function PersonalFinanceDashboard() {
                             </div>
                             <div className="text-xl font-bold text-slate-900 tabular-nums">{fmt(item.value)}</div>
                             <div className="flex justify-between text-xs text-slate-500 mt-1">
-                              <span>Quota: <strong>{item.pct.toFixed(1)}%</strong></span>
+                              <span>{t('Quota:')} <strong>{item.pct.toFixed(1)}%</strong></span>
                               <span>{desc}</span>
                             </div>
                           </div>
@@ -4450,7 +4521,7 @@ export default function PersonalFinanceDashboard() {
                     </div>
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-center">
                       <div>
-                        <p className="text-xs font-semibold text-slate-700 mb-3 text-center lg:text-left">Quota Attuale Asset</p>
+                        <p className="text-xs font-semibold text-slate-700 mb-3 text-center lg:text-left">{t('Quota Attuale Asset')}</p>
                         <ResponsiveContainer width="100%" height={220}>
                           <PieChart>
                             <Pie data={compositionData.pie} dataKey="value" cx="50%" cy="50%" outerRadius={80} innerRadius={45} labelLine={false}
@@ -4462,7 +4533,7 @@ export default function PersonalFinanceDashboard() {
                         </ResponsiveContainer>
                       </div>
                       <div>
-                        <p className="text-xs font-semibold text-slate-700 mb-3 text-center lg:text-left">Evoluzione Composizione nel Tempo</p>
+                        <p className="text-xs font-semibold text-slate-700 mb-3 text-center lg:text-left">{t('Evoluzione Composizione nel Tempo')}</p>
                         {hasData ? (
                           <ResponsiveContainer width="100%" height={220}>
                             <AreaChart data={compositionData.stacked} margin={{ top: 10, right: 10, left: 0, bottom: 5 }}>
@@ -4477,7 +4548,7 @@ export default function PersonalFinanceDashboard() {
                             </AreaChart>
                           </ResponsiveContainer>
                         ) : (
-                          <EmptyState icon={TrendingUp} title="Dati storici insufficienti" description="Gli snapshots storici mostreranno l'evoluzione grafica della composizione." />
+                          <EmptyState icon={TrendingUp} title={t('Dati storici insufficienti')} description={t("Gli snapshots storici mostreranno l'evoluzione grafica della composizione.")} />
                         )}
                       </div>
                     </div>
@@ -4492,8 +4563,8 @@ export default function PersonalFinanceDashboard() {
         {tab === 'reviews' && (
           <div className="space-y-5">
             <Card>
-              <CardHeader title="Revisioni annuali"
-                subtitle="Documenta decisioni strategiche del portafoglio nel tempo"
+              <CardHeader title={t('Revisioni annuali')}
+                subtitle={t('Documenta decisioni strategiche del portafoglio nel tempo')}
                 icon={FileText} accentColor="indigo"
                 action={
                   <Button size="sm" icon={showAddReview ? X : Plus} onClick={() => {
@@ -4505,29 +4576,29 @@ export default function PersonalFinanceDashboard() {
                 <div className="px-5 pb-5 space-y-3 border-t border-slate-100 pt-4">
                   <div className="grid grid-cols-1 sm:grid-cols-[120px_1fr] gap-3">
                     <div>
-                      <label className="text-xs text-slate-500 font-medium block mb-1.5">Anno</label>
+                      <label className="text-xs text-slate-500 font-medium block mb-1.5">{t('Anno')}</label>
                       <NumberInput value={newReview.year} onChange={v => setNewReview({ ...newReview, year: v })} min={2000} max={2100} />
                     </div>
                     <div>
-                      <label className="text-xs text-slate-500 font-medium block mb-1.5">Titolo</label>
+                      <label className="text-xs text-slate-500 font-medium block mb-1.5">{t('Titolo')}</label>
                       <input type="text" value={newReview.title} onChange={e => setNewReview({ ...newReview, title: e.target.value })}
-                        placeholder="es. Revisione strategica 2026"
+                        placeholder={t('es. Revisione strategica 2026')}
                         className="w-full px-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white" />
                     </div>
                   </div>
                   <div>
-                    <label className="text-xs text-slate-500 font-medium block mb-1.5">Sintesi esecutiva</label>
+                    <label className="text-xs text-slate-500 font-medium block mb-1.5">{t('Sintesi esecutiva')}</label>
                     <textarea rows={2} value={newReview.summary} onChange={e => setNewReview({ ...newReview, summary: e.target.value })}
-                      placeholder="Sommario delle decisioni chiave (1-2 frasi)..."
+                      placeholder={t('Sommario delle decisioni chiave (1-2 frasi)...')}
                       className="w-full px-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white resize-none" />
                   </div>
                   <div>
                     <div className="flex justify-between items-center mb-2">
-                      <label className="text-xs text-slate-500 font-medium">Decisioni strutturali (PRE → POST)</label>
-                      <Button size="xs" icon={Plus} onClick={() => setNewReview({ ...newReview, decisions: [...newReview.decisions, { title: '', pre: '', post: '', rationale: '' }] })}>Aggiungi</Button>
+                      <label className="text-xs text-slate-500 font-medium">{t('Decisioni strutturali (PRE → POST)')}</label>
+                      <Button size="xs" icon={Plus} onClick={() => setNewReview({ ...newReview, decisions: [...newReview.decisions, { title: '', pre: '', post: '', rationale: '' }] })}>{t('Aggiungi')}</Button>
                     </div>
                     {newReview.decisions.length === 0 ? (
-                      <p className="text-xs text-slate-400 italic">Es: "Eliminazione obbligazionario dal Core Portfolio", "Cambio comparto Fon.Te. verso Dinamico"</p>
+                      <p className="text-xs text-slate-400 italic">{t('Es: "Eliminazione obbligazionario dal Core Portfolio", "Cambio comparto Fon.Te. verso Dinamico"')}</p>
                     ) : (
                       <div className="space-y-3">
                         {newReview.decisions.map((dec, idx) => (
@@ -4536,7 +4607,7 @@ export default function PersonalFinanceDashboard() {
                               className="absolute top-2 right-2 text-slate-300 hover:text-rose-600 p-1 z-10">
                               <X size={12} />
                             </button>
-                            <input type="text" placeholder="Titolo della decisione" value={dec.title}
+                            <input type="text" placeholder={t('Titolo della decisione')} value={dec.title}
                               onChange={e => {
                                 const nd = [...newReview.decisions];
                                 nd[idx] = { ...dec, title: e.target.value };
@@ -4544,14 +4615,14 @@ export default function PersonalFinanceDashboard() {
                               }}
                               className="w-full px-2.5 py-1.5 text-xs font-medium border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white pr-7" />
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                              <textarea rows={2} placeholder="PRIMA — situazione precedente" value={dec.pre}
+                              <textarea rows={2} placeholder={t('PRIMA — situazione precedente')} value={dec.pre}
                                 onChange={e => {
                                   const nd = [...newReview.decisions];
                                   nd[idx] = { ...dec, pre: e.target.value };
                                   setNewReview({ ...newReview, decisions: nd });
                                 }}
                                 className="w-full px-2.5 py-1.5 text-xs border border-rose-200 rounded-md focus:outline-none focus:ring-2 focus:ring-rose-300 bg-white resize-none" />
-                              <textarea rows={2} placeholder="DOPO — nuova configurazione" value={dec.post}
+                              <textarea rows={2} placeholder={t('DOPO — nuova configurazione')} value={dec.post}
                                 onChange={e => {
                                   const nd = [...newReview.decisions];
                                   nd[idx] = { ...dec, post: e.target.value };
@@ -4559,7 +4630,7 @@ export default function PersonalFinanceDashboard() {
                                 }}
                                 className="w-full px-2.5 py-1.5 text-xs border border-emerald-200 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white resize-none" />
                             </div>
-                            <textarea rows={2} placeholder="Razionale della decisione (perché?)" value={dec.rationale}
+                            <textarea rows={2} placeholder={t('Razionale della decisione (perché?)')} value={dec.rationale}
                               onChange={e => {
                                 const nd = [...newReview.decisions];
                                 nd[idx] = { ...dec, rationale: e.target.value };
@@ -4572,15 +4643,15 @@ export default function PersonalFinanceDashboard() {
                     )}
                   </div>
                   <div className="flex justify-end gap-2 pt-2">
-                    <Button variant="secondary" onClick={() => setShowAddReview(false)}>Annulla</Button>
+                    <Button variant="secondary" onClick={() => setShowAddReview(false)}>{t('Annulla')}</Button>
                     <Button variant="primary" icon={Check} onClick={() => {
-                      if (!newReview.title.trim()) { setToast({ message: 'Titolo richiesto', type: 'error' }); return; }
+                      if (!newReview.title.trim()) { setToast({ message: t('Titolo richiesto'), type: 'error' }); return; }
                       const rev = { ...newReview, id: generateId('rev_'), date: todayKey() };
                       updateState({ reviews: [rev, ...state.reviews] });
                       setShowAddReview(false);
                       setNewReview({ year: new Date().getFullYear(), title: '', summary: '', decisions: [] });
-                      setToast({ message: 'Revisione salvata', type: 'success' });
-                    }}>Salva revisione</Button>
+                      setToast({ message: t('Revisione salvata'), type: 'success' });
+                    }}>{t('Salva revisione')}</Button>
                   </div>
                 </div>
               )}
@@ -4589,8 +4660,8 @@ export default function PersonalFinanceDashboard() {
             {state.reviews.length === 0 ? (
               <Card>
                 <div className="py-2">
-                  <EmptyState icon={FileText} title="Nessuna revisione registrata"
-                    description="Documenta qui le tue decisioni strategiche annuali sul portafoglio. Esempio: la revisione 2026 ha eliminato l'obbligazionario dal Core Portfolio e portato il Fon.Te. sul Comparto Dinamico." />
+                  <EmptyState icon={FileText} title={t('Nessuna revisione registrata')}
+                    description={t("Documenta qui le tue decisioni strategiche annuali sul portafoglio. Esempio: la revisione 2026 ha eliminato l'obbligazionario dal Core Portfolio e portato il Fon.Te. sul Comparto Dinamico.")} />
                 </div>
               </Card>
             ) : (
@@ -4607,7 +4678,7 @@ export default function PersonalFinanceDashboard() {
                             {rev.decisions.length > 0 && <Badge color="slate">{rev.decisions.length} {rev.decisions.length === 1 ? 'decisione' : 'decisioni'}</Badge>}
                           </div>
                           {rev.summary && <p className="text-xs text-slate-600 mt-1.5">{rev.summary}</p>}
-                          <p className="text-[11px] text-slate-400 mt-1">Registrata il {rev.date}</p>
+                          <p className="text-[11px] text-slate-400 mt-1">{t('Registrata il {date}', { date: rev.date })}</p>
                         </button>
                         <div className="flex items-center gap-1 flex-shrink-0">
                           <button onClick={() => setExpandedReview(expanded ? null : rev.id)} className="text-slate-400 hover:text-slate-700 p-1">
@@ -4616,11 +4687,11 @@ export default function PersonalFinanceDashboard() {
                           <button onClick={() => {
                             setConfirmDialog({
                               title: 'Elimina revisione',
-                              message: `Eliminare "${rev.title}"? L'operazione è irreversibile.`,
+                              message: t('Eliminare "{title}"? L\'operazione è irreversibile.', { title: rev.title }),
                               onConfirm: () => {
                                 updateState({ reviews: state.reviews.filter(r => r.id !== rev.id) });
                                 setConfirmDialog(null);
-                                setToast({ message: 'Revisione eliminata', type: 'info' });
+                                setToast({ message: t('Revisione eliminata'), type: 'info' });
                               },
                             });
                           }} className="text-slate-300 hover:text-rose-600 p-1">
@@ -4635,11 +4706,11 @@ export default function PersonalFinanceDashboard() {
                               <p className="text-sm font-semibold text-slate-900 mb-2">{dec.title || `Decisione ${idx + 1}`}</p>
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
                                 <div className="bg-rose-50 border border-rose-200 rounded-lg p-2.5">
-                                  <div className="text-[10px] font-semibold uppercase tracking-wider text-rose-700 mb-1">Prima</div>
+                                  <div className="text-[10px] font-semibold uppercase tracking-wider text-rose-700 mb-1">{t('Prima')}</div>
                                   <p className="text-xs text-slate-700 whitespace-pre-wrap">{dec.pre || '—'}</p>
                                 </div>
                                 <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-2.5">
-                                  <div className="text-[10px] font-semibold uppercase tracking-wider text-emerald-700 mb-1">Dopo</div>
+                                  <div className="text-[10px] font-semibold uppercase tracking-wider text-emerald-700 mb-1">{t('Dopo')}</div>
                                   <p className="text-xs text-slate-700 whitespace-pre-wrap">{dec.post || '—'}</p>
                                 </div>
                               </div>
@@ -4663,18 +4734,71 @@ export default function PersonalFinanceDashboard() {
         {/* ═══════════ SETTINGS ═══════════ */}
         {tab === 'settings' && (
           <div className="space-y-5">
+            {/* 0. Lingua e moduli */}
+            <Card>
+              <CardHeader title={t('Lingua e moduli')} subtitle={t('Scegli la lingua e attiva solo le sezioni che ti servono')} icon={SettingsIcon} accentColor="blue" />
+              <div className="px-5 pb-5 space-y-5">
+                <div>
+                  <label className="text-xs text-slate-500 font-medium block mb-1.5">{t('Lingua interfaccia')}</label>
+                  <div className="flex gap-2 flex-wrap">
+                    {LANGUAGES.map(l => (
+                      <button key={l.id} onClick={() => updateConfig({ language: l.id })}
+                        className={`inline-flex items-center gap-2 px-3.5 py-2 text-sm font-medium rounded-lg border transition-colors ${
+                          config.language === l.id
+                            ? 'border-emerald-500 bg-emerald-50 text-emerald-800'
+                            : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                        }`}>
+                        <span>{l.flag}</span>{l.label}
+                        {config.language === l.id && <Check size={14} className="text-emerald-600" />}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="border-t border-slate-100 dark:border-slate-800 pt-4">
+                  <h4 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider mb-1">{t('Moduli attivi')}</h4>
+                  <p className="text-[11px] text-slate-400 mb-3">{t('Attiva o disattiva intere sezioni dell\'app. Quelle disattivate spariscono dalla navigazione.')}</p>
+                  <div className="space-y-2.5">
+                    {([
+                      { key: 'tax' as const, icon: Receipt, title: t('Fisco e tassazione'), desc: t('Plusvalenze latenti, imposta di bollo, configurazione fiscale degli strumenti. Contenuto specifico per la normativa italiana, disponibile solo in italiano.') },
+                      { key: 'pension' as const, icon: PiggyBank, title: t('Fondo pensione'), desc: t('Previdenza complementare, versamenti e deducibilità fiscale. Contenuto specifico per la normativa italiana, disponibile solo in italiano.') },
+                      { key: 'fire' as const, icon: Flame, title: t('FIRE'), desc: t('Proiezioni di indipendenza finanziaria, scenari di rendimento e roadmap delle milestone.') },
+                    ]).map(m => {
+                      const on = config.modules[m.key];
+                      return (
+                        <div key={m.key} className="flex items-start gap-3 p-3 bg-slate-50 dark:bg-slate-800/30 border border-slate-100 dark:border-slate-800 rounded-xl">
+                          <div className={`p-2 rounded-lg flex-shrink-0 ${on ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-400'}`}>
+                            <m.icon size={15} />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="text-xs font-semibold text-slate-900 dark:text-slate-100">{m.title}</div>
+                            <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">{m.desc}</p>
+                          </div>
+                          <button role="switch" aria-checked={on} aria-label={m.title}
+                            onClick={() => updateConfig({ modules: { ...config.modules, [m.key]: !on } })}
+                            className={`relative w-11 h-6 rounded-full flex-shrink-0 transition-colors ${on ? 'bg-emerald-500' : 'bg-slate-300'}`}>
+                            <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-all ${on ? 'left-[22px]' : 'left-0.5'}`} />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+            </Card>
+
             {/* 1. Profilo */}
             <Card>
-              <CardHeader title="Profilo" icon={Briefcase} accentColor="slate" />
+              <CardHeader title={t('Profilo')} icon={Briefcase} accentColor="slate" />
               <div className="px-5 pb-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="text-xs text-slate-500 font-medium block mb-1.5">Nome</label>
+                  <label className="text-xs text-slate-500 font-medium block mb-1.5">{t('Nome')}</label>
                   <input type="text" value={config.profile.name}
                     onChange={e => updateConfig({ profile: { ...config.profile, name: e.target.value } })}
                     className="w-full px-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white" />
                 </div>
                 <div>
-                  <label className="text-xs text-slate-500 font-medium block mb-1.5">Anno di nascita</label>
+                  <label className="text-xs text-slate-500 font-medium block mb-1.5">{t('Anno di nascita')}</label>
                   <NumberInput value={config.profile.birthYear} onChange={v => updateConfig({ profile: { ...config.profile, birthYear: v } })} min={1900} max={2050} suffix="·" />
                 </div>
               </div>
@@ -4682,35 +4806,35 @@ export default function PersonalFinanceDashboard() {
 
             {/* 2. Stipendio */}
             <Card>
-              <CardHeader title="Stipendio" subtitle="Importo netto, mensilità aggiuntive, RAL e accredito" icon={Briefcase} accentColor="emerald" />
+              <CardHeader title={t('Stipendio')} subtitle={t('Importo netto, mensilità aggiuntive, RAL e accredito')} icon={Briefcase} accentColor="emerald" />
               <div className="px-5 pb-5 grid grid-cols-1 sm:grid-cols-4 gap-4">
                 <div>
-                  <label className="text-xs text-slate-500 font-medium block mb-1.5">Netto mensile</label>
+                  <label className="text-xs text-slate-500 font-medium block mb-1.5">{t('Netto mensile')}</label>
                   <MoneyInput value={config.salary.netAmount} onChange={v => updateConfig({ salary: { ...config.salary, netAmount: safeNum(v) } })} />
                 </div>
                 <div>
-                  <label className="text-xs text-slate-500 font-medium block mb-1.5">Bonus 13ª/14ª</label>
+                  <label className="text-xs text-slate-500 font-medium block mb-1.5">{t('Bonus 13ª/14ª')}</label>
                   <MoneyInput value={config.salary.bonusAmount} onChange={v => updateConfig({ salary: { ...config.salary, bonusAmount: safeNum(v) } })} />
                 </div>
                 <div>
-                  <label className="text-xs text-slate-500 font-medium block mb-1.5">RAL (Lordo Annuo)</label>
+                  <label className="text-xs text-slate-500 font-medium block mb-1.5">{t('RAL (Lordo Annuo)')}</label>
                   <MoneyInput value={config.salary.ral} onChange={v => updateConfig({ salary: { ...config.salary, ral: safeNum(v) } })} />
                 </div>
                 <div>
-                  <label className="text-xs text-slate-500 font-medium block mb-1.5">Giorno accredito</label>
-                  <NumberInput value={config.salary.payDay} onChange={v => updateConfig({ salary: { ...config.salary, payDay: Math.max(1, Math.min(31, v)) } })} min={1} max={31} suffix="del mese" />
+                  <label className="text-xs text-slate-500 font-medium block mb-1.5">{t('Giorno accredito')}</label>
+                  <NumberInput value={config.salary.payDay} onChange={v => updateConfig({ salary: { ...config.salary, payDay: Math.max(1, Math.min(31, v)) } })} min={1} max={31} suffix={t('del mese')} />
                 </div>
                 <div className="sm:col-span-4">
-                  <label className="text-xs text-slate-500 font-medium block mb-2">Mesi bonus</label>
+                  <label className="text-xs text-slate-500 font-medium block mb-2">{t('Mesi bonus')}</label>
                   <div className="flex gap-1.5 flex-wrap">
-                    {MONTHS_IT.map((m, i) => {
+                    {MONTHS_IT.map((_m, i) => {
                       const active = config.salary.bonusMonths.includes(i);
                       return (
                         <button key={i} onClick={() => {
                           const newBonus = active ? config.salary.bonusMonths.filter(x => x !== i) : [...config.salary.bonusMonths, i].sort();
                           updateConfig({ salary: { ...config.salary, bonusMonths: newBonus } });
                         }} className={`px-2.5 py-1 text-xs rounded-lg border transition-colors ${active ? 'bg-amber-100 border-amber-300 text-amber-800 font-semibold' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
-                          {MONTHS_IT_SHORT[i]}
+                          {monthShort(config.language, i)}
                         </button>
                       );
                     })}
@@ -4721,8 +4845,8 @@ export default function PersonalFinanceDashboard() {
 
             {/* 3. Spese fisse */}
             <Card>
-              <CardHeader title="Spese fisse mensili"
-                subtitle={totalFixedExpenses > 0 ? `Totale ${fmt(totalFixedExpenses)}/mese · Margine reale ${fmt(realMargin)}` : 'Configura le tue uscite ricorrenti'}
+              <CardHeader title={t('Spese fisse mensili')}
+                subtitle={totalFixedExpenses > 0 ? t('Totale {total}/mese · Margine reale {margin}', { total: fmt(totalFixedExpenses), margin: fmt(realMargin) }) : t('Configura le tue uscite ricorrenti')}
                 icon={Home} accentColor="rose" />
               <div className="px-5 pb-5 space-y-4">
                 <div className="space-y-3">
@@ -4754,7 +4878,7 @@ export default function PersonalFinanceDashboard() {
                               [key]: { ...exp, label: e.target.value }
                             }
                           })}
-                          placeholder="es. Affitto"
+                          placeholder={t('es. Affitto')}
                           className="flex-1 px-2.5 py-1.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-rose-300 focus:border-rose-300 min-w-0" />
 
                         {/* Modifica Importo */}
@@ -4771,7 +4895,7 @@ export default function PersonalFinanceDashboard() {
                         />
 
                         {/* Elimina Spesa */}
-                        <button onClick={() => deleteFixedExpense(key)} className="text-slate-400 hover:text-rose-600 transition-colors p-1.5 flex-shrink-0" title="Rimuovi spesa fissa">
+                        <button onClick={() => deleteFixedExpense(key)} className="text-slate-400 hover:text-rose-600 transition-colors p-1.5 flex-shrink-0" title={t('Rimuovi spesa fissa')}>
                           <Trash2 size={14} />
                         </button>
                       </div>
@@ -4779,14 +4903,14 @@ export default function PersonalFinanceDashboard() {
                   })}
                   
                   {Object.keys(config.expenses || {}).length === 0 && (
-                    <p className="text-xs text-slate-400 italic text-center py-2">Nessuna spesa fissa configurata.</p>
+                    <p className="text-xs text-slate-400 italic text-center py-2">{t('Nessuna spesa fissa configurata.')}</p>
                   )}
                 </div>
 
                 <div className="flex justify-between items-center pt-2 border-t border-slate-100">
-                  <Button size="sm" icon={Plus} onClick={addFixedExpense}>Aggiungi Spesa Fissa</Button>
+                  <Button size="sm" icon={Plus} onClick={addFixedExpense}>{t('Aggiungi Spesa Fissa')}</Button>
                   <div className="text-right text-xs">
-                    <span className="text-slate-500 mr-2">Totale spese fisse</span>
+                    <span className="text-slate-500 mr-2">{t('Totale spese fisse')}</span>
                     <span className="font-semibold tabular-nums text-rose-700">{fmt(totalFixedExpenses)}/mese</span>
                   </div>
                 </div>
@@ -4794,18 +4918,18 @@ export default function PersonalFinanceDashboard() {
                 {totalFixedExpenses > 0 && (
                   <div className={`rounded-lg p-2.5 text-xs flex items-center gap-2 ${realMargin >= 0 ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'}`}>
                     {realMargin >= 0
-                      ? <><CheckCircle2 size={13} className="text-emerald-600 flex-shrink-0" /><span>Margine mensile dopo PAC: <strong>{fmt(realMargin)}</strong></span></>
-                      : <><AlertCircle size={13} className="text-amber-600 flex-shrink-0" /><span>PAC sovradimensionato di <strong>{fmt(Math.abs(realMargin))}</strong> rispetto alle entrate disponibili</span></>
+                      ? <><CheckCircle2 size={13} className="text-emerald-600 flex-shrink-0" /><span>{t('Margine mensile dopo PAC:')} <strong>{fmt(realMargin)}</strong></span></>
+                      : <><AlertCircle size={13} className="text-amber-600 flex-shrink-0" /><span>{t('PAC sovradimensionato di')} <strong>{fmt(Math.abs(realMargin))}</strong> {t('rispetto alle entrate disponibili')}</span></>
                     }
                   </div>
                 )}
-                <p className="text-[11px] text-slate-400">Le spese fisse sono automaticamente dedotte dal cashflow e non richiedono conferma mensile.</p>
+                <p className="text-[11px] text-slate-400">{t('Le spese fisse sono automaticamente dedotte dal cashflow e non richiedono conferma mensile.')}</p>
               </div>
             </Card>
 
             {/* 4. Spese Variabili */}
             <Card>
-              <CardHeader title="Spese Variabili Stimate" subtitle="Budget mensili stimati per evitare sovrastime della liquidità cashflow" icon={Receipt} accentColor="rose" />
+              <CardHeader title={t('Spese Variabili Stimate')} subtitle={t('Budget mensili stimati per evitare sovrastime della liquidità cashflow')} icon={Receipt} accentColor="rose" />
               <div className="px-5 pb-5 space-y-4">
                 <div className="space-y-3">
                   {Object.entries(config.variableExpenses || {}).map(([key, exp]: [string, any]) => {
@@ -4819,7 +4943,7 @@ export default function PersonalFinanceDashboard() {
                               [key]: { ...exp, label: e.target.value }
                             }
                           })}
-                          placeholder="es. Spesa e Alimentari"
+                          placeholder={t('es. Spesa e Alimentari')}
                           className="flex-1 px-2.5 py-1.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-rose-300 focus:border-rose-300 min-w-0" />
 
                         {/* Modifica Importo */}
@@ -4836,7 +4960,7 @@ export default function PersonalFinanceDashboard() {
                         />
 
                         {/* Elimina Spesa */}
-                        <button onClick={() => deleteVariableExpense(key)} className="text-slate-400 hover:text-rose-600 transition-colors p-1.5 flex-shrink-0" title="Rimuovi spesa variabile">
+                        <button onClick={() => deleteVariableExpense(key)} className="text-slate-400 hover:text-rose-600 transition-colors p-1.5 flex-shrink-0" title={t('Rimuovi spesa variabile')}>
                           <Trash2 size={14} />
                         </button>
                       </div>
@@ -4844,14 +4968,14 @@ export default function PersonalFinanceDashboard() {
                   })}
 
                   {Object.keys(config.variableExpenses || {}).length === 0 && (
-                    <p className="text-xs text-slate-400 italic text-center py-2">Nessun budget per spese variabili configurato.</p>
+                    <p className="text-xs text-slate-400 italic text-center py-2">{t('Nessun budget per spese variabili configurato.')}</p>
                   )}
                 </div>
 
                 <div className="flex justify-between items-center pt-2 border-t border-slate-100">
-                  <Button size="sm" icon={Plus} onClick={addVariableExpense}>Aggiungi Spesa Variabile</Button>
+                  <Button size="sm" icon={Plus} onClick={addVariableExpense}>{t('Aggiungi Spesa Variabile')}</Button>
                   <div className="text-right text-xs">
-                    <span className="text-slate-500 mr-2">Totale stima spese variabili</span>
+                    <span className="text-slate-500 mr-2">{t('Totale stima spese variabili')}</span>
                     <span className="font-semibold tabular-nums text-rose-700">{fmt(totalVariableExpenses)}/mese</span>
                   </div>
                 </div>
@@ -4860,7 +4984,7 @@ export default function PersonalFinanceDashboard() {
 
             {/* 5. Sistema a cascata */}
             <Card>
-              <CardHeader title="Cap sistema a cascata (Waterfall)" subtitle="Definisci i livelli di riempimento progressivo della liquidità" icon={Wallet} accentColor="amber" />
+              <CardHeader title={t('Cap sistema a cascata (Waterfall)')} subtitle={t('Definisci i livelli di riempimento progressivo della liquidità')} icon={Wallet} accentColor="amber" />
               <div className="px-5 pb-5 space-y-4">
                 <div className="space-y-4">
                   {config.waterfallLevels.map((lv, idx) => {
@@ -4875,7 +4999,7 @@ export default function PersonalFinanceDashboard() {
                               newLv[idx] = { ...newLv[idx], name: e.target.value };
                               updateConfig({ waterfallLevels: newLv });
                             }}
-                            placeholder="Nome del buffer"
+                            placeholder={t('Nome del buffer')}
                             className="flex-1 px-2.5 py-1.5 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-300" />
                           
                           {/* Cap Input o Badge Overflow per l'ultimo livello */}
@@ -4893,7 +5017,7 @@ export default function PersonalFinanceDashboard() {
 
                           {/* Pulsante Rimuovi Buffer */}
                           {config.waterfallLevels.length > 1 && (
-                            <button onClick={() => deleteWaterfallLevel(lv.id)} className="text-slate-400 hover:text-rose-600 transition-colors p-1.5 flex-shrink-0" title="Rimuovi buffer">
+                            <button onClick={() => deleteWaterfallLevel(lv.id)} className="text-slate-400 hover:text-rose-600 transition-colors p-1.5 flex-shrink-0" title={t('Rimuovi buffer')}>
                               <Trash2 size={14} />
                             </button>
                           )}
@@ -4901,9 +5025,9 @@ export default function PersonalFinanceDashboard() {
 
                         {/* Rigo opzioni pl-4: Descrizione ed Icona */}
                         <div className="flex items-center gap-2 pl-4">
-                          <span className="text-[11px] text-slate-400 w-12 flex-shrink-0">Descrizione:</span>
+                          <span className="text-[11px] text-slate-400 w-12 flex-shrink-0">{t('Descrizione:')}</span>
                           <input type="text" value={lv.desc || ''}
-                            placeholder="es. Spese straordinarie e imprevisti"
+                            placeholder={t('es. Spese straordinarie e imprevisti')}
                             onChange={e => {
                               const newLv = [...config.waterfallLevels];
                               newLv[idx] = { ...newLv[idx], desc: e.target.value };
@@ -4911,7 +5035,7 @@ export default function PersonalFinanceDashboard() {
                             }}
                             className="flex-1 px-2.5 py-1 text-xs border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-emerald-200" />
                           
-                          <span className="text-[11px] text-slate-400 w-10 flex-shrink-0 text-right">Icona:</span>
+                          <span className="text-[11px] text-slate-400 w-10 flex-shrink-0 text-right">{t('Icona:')}</span>
                           <select value={lv.icon || 'coffee'}
                             onChange={e => {
                               const newLv = [...config.waterfallLevels];
@@ -4919,10 +5043,10 @@ export default function PersonalFinanceDashboard() {
                               updateConfig({ waterfallLevels: newLv });
                             }}
                             className="px-2 py-0.5 border border-slate-200 rounded-lg text-xs bg-white focus:outline-none focus:ring-1 focus:ring-emerald-300">
-                            <option value="shield">🛡️ Scudo</option>
-                            <option value="coffee">☕ Svago</option>
-                            <option value="zap">⚡ Operatività</option>
-                            <option value="rocket">🚀 Investimenti</option>
+                            <option value="shield">{t('🛡️ Scudo')}</option>
+                            <option value="coffee">{t('☕ Svago')}</option>
+                            <option value="zap">{t('⚡ Operatività')}</option>
+                            <option value="rocket">{t('🚀 Investimenti')}</option>
                           </select>
                         </div>
                       </div>
@@ -4931,23 +5055,23 @@ export default function PersonalFinanceDashboard() {
                 </div>
 
                 <div className="flex justify-start pt-2 border-t border-slate-100">
-                  <Button size="sm" icon={Plus} onClick={addWaterfallLevel}>Aggiungi Buffer Liquidità</Button>
+                  <Button size="sm" icon={Plus} onClick={addWaterfallLevel}>{t('Aggiungi Buffer Liquidità')}</Button>
                 </div>
-                <p className="text-[11px] text-slate-400">La liquidità inserita riempirà i buffer in ordine sequenziale fino al cap impostato. Eventuali eccedenze confluiranno automaticamente nell'ultimo livello (Overflow).</p>
+                <p className="text-[11px] text-slate-400">{t("La liquidità inserita riempirà i buffer in ordine sequenziale fino al cap impostato. Eventuali eccedenze confluiranno automaticamente nell'ultimo livello (Overflow).")}</p>
               </div>
             </Card>
 
             {/* 6. Conto Deposito Svincolato */}
             <Card>
-              <CardHeader title="Conto Deposito Svincolato" subtitle="Liquidità fruttifera a basso rischio per far maturare piccoli interessi" icon={PiggyBank} accentColor="amber" />
+              <CardHeader title={t('Conto Deposito Svincolato')} subtitle={t('Liquidità fruttifera a basso rischio per far maturare piccoli interessi')} icon={PiggyBank} accentColor="amber" />
               <div className="px-5 pb-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="text-xs text-slate-500 font-medium block mb-1.5">Quota in Conto Deposito (€)</label>
+                  <label className="text-xs text-slate-500 font-medium block mb-1.5">{t('Quota in Conto Deposito (€)')}</label>
                   <MoneyInput value={config.contoDepositoAmount ?? 0} onChange={v => updateConfig({ contoDepositoAmount: safeNum(v) })} />
-                  <p className="text-[10px] text-slate-400 mt-1">Quota massima consigliata: {fmt(totalLiq)} (tutta la liquidità)</p>
+                  <p className="text-[10px] text-slate-400 mt-1">{t('Quota massima consigliata: {amount} (tutta la liquidità)', { amount: fmt(totalLiq) })}</p>
                 </div>
                 <div>
-                  <label className="text-xs text-slate-500 font-medium block mb-1.5">Tasso d'interesse annuo lordo (%)</label>
+                  <label className="text-xs text-slate-500 font-medium block mb-1.5">{t("Tasso d'interesse annuo lordo (%)")}</label>
                   <NumberInput value={config.contoDepositoRate ?? 1.5} onChange={v => updateConfig({ contoDepositoRate: v })} suffix="%" step={0.1} />
                 </div>
               </div>
@@ -4955,25 +5079,25 @@ export default function PersonalFinanceDashboard() {
 
             {/* 7. PAC */}
             <Card>
-              <CardHeader title="PAC" subtitle="Versamento ricorrente e allocazione strumenti" icon={CreditCard} accentColor="indigo" />
+              <CardHeader title={t('PAC')} subtitle={t('Versamento ricorrente e allocazione strumenti')} icon={CreditCard} accentColor="indigo" />
               <div className="px-5 pb-5">
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-5">
                   <div>
-                    <label className="text-xs text-slate-500 font-medium block mb-1.5">Importo mensile</label>
+                    <label className="text-xs text-slate-500 font-medium block mb-1.5">{t('Importo mensile')}</label>
                     <MoneyInput value={config.pac.monthlyAmount} onChange={v => updateConfig({ pac: { ...config.pac, monthlyAmount: safeNum(v) } })} />
                   </div>
                   <div>
-                    <label className="text-xs text-slate-500 font-medium block mb-1.5">Giorno addebito</label>
-                    <NumberInput value={config.pac.payDay} onChange={v => updateConfig({ pac: { ...config.pac, payDay: Math.max(1, Math.min(31, v)) } })} min={1} max={31} suffix="del mese" />
+                    <label className="text-xs text-slate-500 font-medium block mb-1.5">{t('Giorno addebito')}</label>
+                    <NumberInput value={config.pac.payDay} onChange={v => updateConfig({ pac: { ...config.pac, payDay: Math.max(1, Math.min(31, v)) } })} min={1} max={31} suffix={t('del mese')} />
                   </div>
                   <div>
-                    <label className="text-xs text-slate-500 font-medium block mb-1.5">Broker</label>
+                    <label className="text-xs text-slate-500 font-medium block mb-1.5">{t('Broker')}</label>
                     <input type="text" value={config.pac.broker} onChange={e => updateConfig({ pac: { ...config.pac, broker: e.target.value } })}
                       className="w-full px-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white" />
                   </div>
                 </div>
                 <div>
-                  <p className="text-xs text-slate-500 font-medium mb-2">Allocazione strumenti (somma deve = 100%)</p>
+                  <p className="text-xs text-slate-500 font-medium mb-2">{t('Allocazione strumenti (somma deve = 100%)')}</p>
                   <div className="space-y-4">
                     {config.pac.instruments.map((ins, idx) => (
                       <div key={ins.id} className="space-y-1.5 bg-slate-50/50 p-2.5 rounded-xl border border-slate-100">
@@ -4991,14 +5115,14 @@ export default function PersonalFinanceDashboard() {
                             newIns[idx] = { ...newIns[idx], pct: Math.max(0, v) };
                             updateConfig({ pac: { ...config.pac, instruments: newIns } });
                           }} suffix="%" step={0.5} />
-                          <button onClick={() => deleteInstrument(ins.id)} className="text-slate-400 hover:text-rose-600 transition-colors p-1.5 flex-shrink-0" title="Rimuovi strumento">
+                          <button onClick={() => deleteInstrument(ins.id)} className="text-slate-400 hover:text-rose-600 transition-colors p-1.5 flex-shrink-0" title={t('Rimuovi strumento')}>
                             <Trash2 size={14} />
                           </button>
                         </div>
                         <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap pl-4">
-                          <span className="text-[11px] text-slate-400 w-12 flex-shrink-0">Ticker:</span>
+                          <span className="text-[11px] text-slate-400 w-12 flex-shrink-0">{t('Ticker:')}</span>
                           <input type="text" value={ins.ticker || ''}
-                            placeholder="es. SWDA.MI"
+                            placeholder={t('es. SWDA.MI')}
                             onChange={e => {
                               const newIns = [...config.pac.instruments];
                               newIns[idx] = { ...newIns[idx], ticker: e.target.value.toUpperCase() };
@@ -5006,9 +5130,9 @@ export default function PersonalFinanceDashboard() {
                             }}
                             className="flex-1 min-w-[80px] px-2.5 py-1 text-xs font-mono border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-300 focus:border-blue-300" />
                           
-                          <span className="text-[11px] text-slate-400 w-10 flex-shrink-0 text-right">ISIN:</span>
+                          <span className="text-[11px] text-slate-400 w-10 flex-shrink-0 text-right">{t('ISIN:')}</span>
                           <input type="text" value={ins.isin || ''}
-                            placeholder="es. IE00B4L60045"
+                            placeholder={t('es. IE00B4L60045')}
                             onChange={e => {
                               const newIns = [...config.pac.instruments];
                               newIns[idx] = { ...newIns[idx], isin: e.target.value.toUpperCase() };
@@ -5016,7 +5140,7 @@ export default function PersonalFinanceDashboard() {
                             }}
                             className="flex-1 min-w-[90px] px-2.5 py-1 text-xs font-mono border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300 focus:border-indigo-300" />
                           
-                          <span className="text-[11px] text-slate-400 w-10 flex-shrink-0 text-right">TER:</span>
+                          <span className="text-[11px] text-slate-400 w-10 flex-shrink-0 text-right">{t('TER:')}</span>
                           <NumberInput className="w-20" value={ins.ter} onChange={v => {
                             const newIns = [...config.pac.instruments];
                             newIns[idx] = { ...newIns[idx], ter: Math.max(0, v) };
@@ -5027,13 +5151,13 @@ export default function PersonalFinanceDashboard() {
                     ))}
                     
                     {config.pac.instruments.length === 0 && (
-                      <p className="text-xs text-slate-400 italic text-center py-3">Nessun ETF aggiunto. Clicca su Aggiungi Strumento per iniziare.</p>
+                      <p className="text-xs text-slate-400 italic text-center py-3">{t('Nessun ETF aggiunto. Clicca su Aggiungi Strumento per iniziare.')}</p>
                     )}
 
                     <div className="flex justify-between items-center pt-2 border-t border-slate-100">
-                      <Button size="sm" icon={Plus} onClick={addInstrument}>Aggiungi Strumento</Button>
+                      <Button size="sm" icon={Plus} onClick={addInstrument}>{t('Aggiungi Strumento')}</Button>
                       <div className="text-right text-xs">
-                        <span className="text-slate-500 mr-2">Totale allocazione</span>
+                        <span className="text-slate-500 mr-2">{t('Totale allocazione')}</span>
                         <span className={`font-semibold tabular-nums ${Math.abs(config.pac.instruments.reduce((s, i) => s + i.pct, 0) - 100) < 0.01 ? 'text-emerald-700' : 'text-rose-700'}`}>
                           {config.pac.instruments.reduce((s, i) => s + i.pct, 0).toFixed(1)}%
                         </span>
@@ -5045,57 +5169,59 @@ export default function PersonalFinanceDashboard() {
             </Card>
 
             {/* 8. Previdenza Complementare */}
+            {config.modules.pension && (
             <Card>
-              <CardHeader title={config.fonte.name || 'Fondo Pensione'} subtitle="Previdenza complementare" icon={PiggyBank} accentColor="purple" />
+              <CardHeader title={config.fonte.name || 'Fondo Pensione'} subtitle={t('Previdenza complementare')} icon={PiggyBank} accentColor="purple" />
               <div className="px-5 pb-5 space-y-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pb-4 border-b border-slate-100">
                   <div>
-                    <label className="text-xs text-slate-500 font-medium block mb-1.5">Nome del Fondo</label>
+                    <label className="text-xs text-slate-500 font-medium block mb-1.5">{t('Nome del Fondo')}</label>
                     <input type="text" value={config.fonte.name} onChange={e => updateConfig({ fonte: { ...config.fonte, name: e.target.value } })}
                       className="w-full px-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white" />
                   </div>
                   <div>
-                    <label className="text-xs text-slate-500 font-medium block mb-1.5">Asset Allocation (descrizione)</label>
+                    <label className="text-xs text-slate-500 font-medium block mb-1.5">{t('Asset Allocation (descrizione)')}</label>
                     <input type="text" value={config.fonte.allocation} onChange={e => updateConfig({ fonte: { ...config.fonte, allocation: e.target.value } })}
                       className="w-full px-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white" />
                   </div>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div>
-                    <label className="text-xs text-slate-500 font-medium block mb-1.5">Contributo/mese</label>
+                    <label className="text-xs text-slate-500 font-medium block mb-1.5">{t('Contributo/mese')}</label>
                     <MoneyInput value={config.fonte.monthlyContribution} onChange={v => updateConfig({ fonte: { ...config.fonte, monthlyContribution: safeNum(v) } })} />
                   </div>
                   <div>
-                    <label className="text-xs text-slate-500 font-medium block mb-1.5">TER (%)</label>
+                    <label className="text-xs text-slate-500 font-medium block mb-1.5">{t('TER (%)')}</label>
                     <NumberInput value={config.fonte.ter} onChange={v => updateConfig({ fonte: { ...config.fonte, ter: v } })} suffix="%" step={0.01} />
                   </div>
                   <div>
-                    <label className="text-xs text-slate-500 font-medium block mb-1.5">Comparto</label>
+                    <label className="text-xs text-slate-500 font-medium block mb-1.5">{t('Comparto')}</label>
                     <input type="text" value={config.fonte.comparto} onChange={e => updateConfig({ fonte: { ...config.fonte, comparto: e.target.value } })}
                       className="w-full px-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white" />
                   </div>
                 </div>
               </div>
             </Card>
+            )}
 
             {/* 9. Obiettivi e Crescita */}
             <Card>
-              <CardHeader title="Obiettivi e Crescita Patrimoniale" subtitle="Definisci gli obiettivi di crescita del patrimonio, target FIRE e parametri di inflazione" icon={Trophy} accentColor="orange" />
+              <CardHeader title={t('Obiettivi e Crescita Patrimoniale')} subtitle={t('Definisci gli obiettivi di crescita del patrimonio, target FIRE e parametri di inflazione')} icon={Trophy} accentColor="orange" />
               <div className="px-5 pb-5 grid grid-cols-1 sm:grid-cols-4 gap-4">
                 <div>
-                  <label className="text-xs text-slate-500 font-medium block mb-1.5">Crescita annua target (%)</label>
+                  <label className="text-xs text-slate-500 font-medium block mb-1.5">{t('Crescita annua target (%)')}</label>
                   <NumberInput value={config.annualGrowthTarget} onChange={v => updateConfig({ annualGrowthTarget: v })} suffix="%" step={0.5} />
                 </div>
                 <div>
-                  <label className="text-xs text-slate-500 font-medium block mb-1.5">FIRE Number Target (€)</label>
+                  <label className="text-xs text-slate-500 font-medium block mb-1.5">{t('FIRE Number Target (€)')}</label>
                   <MoneyInput value={config.fireNumber} onChange={v => updateConfig({ fireNumber: safeNum(v) })} />
                 </div>
                 <div>
-                  <label className="text-xs text-slate-500 font-medium block mb-1.5">Rendita mensile target (€)</label>
+                  <label className="text-xs text-slate-500 font-medium block mb-1.5">{t('Rendita mensile target (€)')}</label>
                   <MoneyInput value={config.monthlyDesiredIncome} onChange={v => updateConfig({ monthlyDesiredIncome: safeNum(v) })} />
                 </div>
                 <div>
-                  <label className="text-xs text-slate-500 font-medium block mb-1.5">Tasso inflazione atteso (%)</label>
+                  <label className="text-xs text-slate-500 font-medium block mb-1.5">{t('Tasso inflazione atteso (%)')}</label>
                   <NumberInput value={config.expectedInflationRate !== undefined ? config.expectedInflationRate : 2.0} onChange={v => updateConfig({ expectedInflationRate: safeNum(v, 2.0) })} suffix="%" step={0.1} />
                 </div>
               </div>
@@ -5103,7 +5229,7 @@ export default function PersonalFinanceDashboard() {
 
             {/* Milestone Personalizzate */}
             <Card>
-              <CardHeader title="Milestone Personalizzate" subtitle="Aggiungi o rimuovi traguardi di capitale personalizzati" icon={Flag} accentColor="orange" />
+              <CardHeader title={t('Milestone Personalizzate')} subtitle={t('Aggiungi o rimuovi traguardi di capitale personalizzati')} icon={Flag} accentColor="orange" />
               <div className="px-5 pb-5 space-y-4">
                 <div className="space-y-2">
                   {(config.customMilestones || []).map((m: any) => (
@@ -5111,27 +5237,27 @@ export default function PersonalFinanceDashboard() {
                       <span className="text-sm font-medium text-slate-700">{m.label}</span>
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-semibold tabular-nums text-slate-900">{fmt(m.targetAmount)}</span>
-                        <button onClick={() => deleteCustomMilestone(m.id)} className="text-slate-400 hover:text-rose-600 transition-colors p-1.5 flex-shrink-0" title="Rimuovi milestone">
+                        <button onClick={() => deleteCustomMilestone(m.id)} className="text-slate-400 hover:text-rose-600 transition-colors p-1.5 flex-shrink-0" title={t('Rimuovi milestone')}>
                           <Trash2 size={14} />
                         </button>
                       </div>
                     </div>
                   ))}
                   {(config.customMilestones || []).length === 0 && (
-                    <p className="text-xs text-slate-400 italic text-center py-2">Nessuna milestone personalizzata configurata.</p>
+                    <p className="text-xs text-slate-400 italic text-center py-2">{t('Nessuna milestone personalizzata configurata.')}</p>
                   )}
                 </div>
 
                 <div className="flex gap-2 items-end pt-3 border-t border-slate-100 flex-wrap sm:flex-nowrap">
                   <div className="flex-1 min-w-[150px]">
-                    <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 block mb-1">Nome traguardo</label>
+                    <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 block mb-1">{t('Nome traguardo')}</label>
                     <input type="text" value={newMsLabel} onChange={e => setNewMsLabel(e.target.value)}
-                      placeholder="es. Acquisto Casa, Auto..."
+                      placeholder={t('es. Acquisto Casa, Auto...')}
                       className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white" />
                   </div>
                   <div className="w-36">
-                    <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 block mb-1">Capitale Target</label>
-                    <MoneyInput size="sm" value={newMsAmount} onChange={setNewMsAmount} placeholder="es. 50000" />
+                    <label className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 block mb-1">{t('Capitale Target')}</label>
+                    <MoneyInput size="sm" value={newMsAmount} onChange={setNewMsAmount} placeholder={t('es. 50000')} />
                   </div>
                   <Button size="sm" variant="primary" icon={Plus} onClick={addCustomMilestone} disabled={!newMsLabel.trim() || !newMsAmount}>
                     Aggiungi
@@ -5140,42 +5266,44 @@ export default function PersonalFinanceDashboard() {
               </div>
             </Card>
 
+            {config.modules.fire && (
             <Card>
-              <CardHeader title="Obiettivo FIRE" subtitle="Riconfigura età target e rendimento atteso" icon={Flame} accentColor="orange"
-                action={<Button size="sm" icon={Sparkles} onClick={() => { setObRetireAge(String(state.fireParams.retireAge)); setObReturnRate(String(state.fireParams.rate)); setShowFireWizard(true); }}>Configura</Button>} />
+              <CardHeader title={t('Obiettivo FIRE')} subtitle={t('Riconfigura età target e rendimento atteso')} icon={Flame} accentColor="orange"
+                action={<Button size="sm" icon={Sparkles} onClick={() => { setObRetireAge(String(state.fireParams.retireAge)); setObReturnRate(String(state.fireParams.rate)); setShowFireWizard(true); }}>{t('Configura')}</Button>} />
               <div className="px-5 pb-5">
                 <div className="grid grid-cols-3 gap-3">
                   <div className="bg-orange-50 rounded-lg p-3">
-                    <div className="text-[10px] font-semibold uppercase tracking-wider text-orange-600 mb-1">Età ritiro</div>
-                    <div className="text-sm font-semibold text-slate-900">{state.fireParams.retireAge} anni</div>
+                    <div className="text-[10px] font-semibold uppercase tracking-wider text-orange-600 mb-1">{t('Età ritiro')}</div>
+                    <div className="text-sm font-semibold text-slate-900">{t('{age} anni', { age: state.fireParams.retireAge })}</div>
                   </div>
                   <div className="bg-orange-50 rounded-lg p-3">
-                    <div className="text-[10px] font-semibold uppercase tracking-wider text-orange-600 mb-1">Rendimento PAC</div>
+                    <div className="text-[10px] font-semibold uppercase tracking-wider text-orange-600 mb-1">{t('Rendimento PAC')}</div>
                     <div className="text-sm font-semibold text-slate-900">{state.fireParams.rate}%</div>
                   </div>
                   <div className="bg-orange-50 rounded-lg p-3">
-                    <div className="text-[10px] font-semibold uppercase tracking-wider text-orange-600 mb-1">Milestone generate</div>
+                    <div className="text-[10px] font-semibold uppercase tracking-wider text-orange-600 mb-1">{t('Milestone generate')}</div>
                     <div className="text-sm font-semibold text-slate-900">{MILESTONES.length}</div>
                   </div>
                 </div>
               </div>
             </Card>
+            )}
 
             {/* 10. Gestione dati */}
             <Card>
-              <CardHeader title="Gestione dati" subtitle="Backup, ripristino e reset" icon={FileText} accentColor="rose" />
+              <CardHeader title={t('Gestione dati')} subtitle={t('Backup, ripristino e reset')} icon={FileText} accentColor="rose" />
               <div className="px-5 pb-5">
                 <div className="flex flex-wrap gap-2">
-                  <Button onClick={exportData} variant="primary" icon={Download}>Esporta backup JSON</Button>
-                  <Button onClick={() => fileInputRef.current?.click()} variant="secondary" icon={Upload}>Importa backup</Button>
+                  <Button onClick={exportData} variant="primary" icon={Download}>{t('Esporta backup JSON')}</Button>
+                  <Button onClick={() => fileInputRef.current?.click()} variant="secondary" icon={Upload}>{t('Importa backup')}</Button>
                   <input ref={fileInputRef} type="file" accept=".json,application/json" onChange={importData} className="hidden" />
-                  <Button onClick={() => window.print()} variant="secondary" icon={FileText}>Genera Report PDF</Button>
-                  <Button onClick={resetAll} variant="danger" icon={RotateCcw}>Reset dati</Button>
+                  <Button onClick={() => window.print()} variant="secondary" icon={FileText}>{t('Genera Report PDF')}</Button>
+                  <Button onClick={resetAll} variant="danger" icon={RotateCcw}>{t('Reset dati')}</Button>
                 </div>
                 <div className="mt-3 bg-blue-50 border border-blue-200 rounded-lg p-3 flex items-start gap-2">
                   <Info size={14} className="text-blue-600 flex-shrink-0 mt-0.5" />
                   <p className="text-xs text-blue-900">
-                    I dati sono salvati in cloud su Supabase (EU-West, Londra). Puoi esportarli in formato JSON in qualsiasi momento.
+                    {t('I dati sono salvati in cloud su Supabase (EU-West, Londra). Puoi esportarli in formato JSON in qualsiasi momento.')}
                   </p>
                 </div>
               </div>
@@ -5183,23 +5311,23 @@ export default function PersonalFinanceDashboard() {
 
             {/* 11. Privacy & Account */}
             <Card>
-              <CardHeader title="Privacy & Account" subtitle="Diritti GDPR e cancellazione account" icon={Shield} accentColor="slate" />
+              <CardHeader title={t('Privacy & Account')} subtitle={t('Diritti GDPR e cancellazione account')} icon={Shield} accentColor="slate" />
               <div className="px-5 pb-5 space-y-3">
                 <div className="bg-slate-50 rounded-xl p-3 text-xs text-slate-600 space-y-1">
-                  <p>✅ I tuoi dati sono protetti da autenticazione e crittografia</p>
-                  <p>✅ Nessun altro utente può vedere i tuoi dati (Row Level Security)</p>
-                  <p>✅ Puoi esportare o eliminare i tuoi dati in qualsiasi momento</p>
-                  <p>⚠️ L'amministratore del servizio ha accesso tecnico al database (vedi Privacy Policy)</p>
+                  <p>{t('✅ I tuoi dati sono protetti da autenticazione e crittografia')}</p>
+                  <p>{t('✅ Nessun altro utente può vedere i tuoi dati (Row Level Security)')}</p>
+                  <p>{t('✅ Puoi esportare o eliminare i tuoi dati in qualsiasi momento')}</p>
+                  <p>{t("⚠️ L'amministratore del servizio ha accesso tecnico al database (vedi Privacy Policy)")}</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <Button variant="secondary" icon={FileText} onClick={() => {
                     // Dispatch evento per aprire privacy policy in App.tsx
                     window.dispatchEvent(new CustomEvent('show-privacy'));
-                  }}>Privacy Policy</Button>
+                  }}>{t('Privacy Policy')}</Button>
                   <Button variant="danger" icon={LogOut} onClick={() => {
                     setConfirmDialog({
                       title: 'Elimina account e dati',
-                      message: 'Verranno eliminati TUTTI i tuoi dati finanziari e il tuo account. Operazione irreversibile. Esporta un backup prima di procedere.',
+                      message: t('Verranno eliminati TUTTI i tuoi dati finanziari e il tuo account. Operazione irreversibile. Esporta un backup prima di procedere.'),
                       onConfirm: async () => {
                         try {
                           // Cancellazione completa account + dati via Edge Function
@@ -5209,13 +5337,13 @@ export default function PersonalFinanceDashboard() {
                         } catch (e) {
                           // Fallback: almeno i dati finanziari vengono rimossi (RLS-safe).
                           await supabase.from('user_data').delete().eq('user_id', (await supabase.auth.getUser()).data.user?.id || '');
-                          setToast({ message: 'Dati eliminati, ma la cancellazione account ha richiesto un fallback. Contatta l\'amministratore.', type: 'error' });
+                          setToast({ message: t('Dati eliminati, ma la cancellazione account ha richiesto un fallback. Contatta l\'amministratore.'), type: 'error' });
                         }
                         await supabase.auth.signOut();
                         setConfirmDialog(null);
                       },
                     });
-                  }}>Elimina account</Button>
+                  }}>{t('Elimina account')}</Button>
                 </div>
               </div>
             </Card>
@@ -5249,7 +5377,7 @@ export default function PersonalFinanceDashboard() {
                     <Briefcase size={16} className="text-emerald-600" />
                     Conferma stipendio
                   </h3>
-                  <p className="text-xs text-slate-500 mt-0.5">Inserisci l'importo effettivamente accreditato</p>
+                  <p className="text-xs text-slate-500 mt-0.5">{t("Inserisci l'importo effettivamente accreditato")}</p>
                 </div>
                 <button onClick={() => setSalaryConfirmDialog(null)} className="text-slate-400 hover:text-slate-700">
                   <X size={18} />
@@ -5257,7 +5385,7 @@ export default function PersonalFinanceDashboard() {
               </div>
 
               <div className="mb-4">
-                <label className="text-xs text-slate-500 font-medium block mb-1.5">Importo accreditato</label>
+                <label className="text-xs text-slate-500 font-medium block mb-1.5">{t('Importo accreditato')}</label>
                 <MoneyInput size="lg"
                   value={salaryConfirmDialog.actual}
                   onChange={v => setSalaryConfirmDialog({ ...salaryConfirmDialog, actual: v })} />
@@ -5273,7 +5401,7 @@ export default function PersonalFinanceDashboard() {
 
               {actualAmt > 0 && (
                 <div className="bg-slate-50 rounded-xl p-3 mb-4">
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2">Distribuzione liquidità</p>
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2">{t('Distribuzione liquidità')}</p>
                   <div className="space-y-1.5">
                     {fillsBelowCap.length > 0 && fillsBelowCap.map(lv => (
                       <div key={lv.id} className="flex items-center justify-between text-xs">
@@ -5294,17 +5422,17 @@ export default function PersonalFinanceDashboard() {
                       </div>
                     )}
                     {fillsBelowCap.length === 0 && overflowAmount === 0 && (
-                      <p className="text-[11px] text-slate-500 italic">Nessuna distribuzione (importo a zero)</p>
+                      <p className="text-[11px] text-slate-500 italic">{t('Nessuna distribuzione (importo a zero)')}</p>
                     )}
                   </div>
                   {overflowAmount > 0 && fillsBelowCap.length === 0 && (
-                    <p className="text-[10px] text-slate-500 mt-2">Tutti i livelli con cap sono già pieni — l'intero stipendio va su overflow.</p>
+                    <p className="text-[10px] text-slate-500 mt-2">{t("Tutti i livelli con cap sono già pieni — l'intero stipendio va su overflow.")}</p>
                   )}
                 </div>
               )}
 
               <div className="flex justify-end gap-2">
-                <Button variant="secondary" onClick={() => setSalaryConfirmDialog(null)}>Annulla</Button>
+                <Button variant="secondary" onClick={() => setSalaryConfirmDialog(null)}>{t('Annulla')}</Button>
                 <Button variant="primary" icon={Check}
                   disabled={actualAmt <= 0}
                   onClick={() => applySalaryConfirm(salaryConfirmDialog.key, salaryConfirmDialog.actual)}>
@@ -5325,6 +5453,7 @@ export default function PersonalFinanceDashboard() {
           onConfirm={confirmDialog.onConfirm}
           onCancel={() => setConfirmDialog(null)}
           variant={confirmDialog.variant === 'primary' ? 'primary' : 'danger'}
+          t={t}
         />
       )}
 
@@ -5342,9 +5471,9 @@ export default function PersonalFinanceDashboard() {
                 <div>
                   <h3 className="text-base font-semibold text-slate-900 flex items-center gap-2">
                     <Receipt size={16} className="text-rose-600" />
-                    Registra Spese Effettive del Mese
+                    {t('Registra Spese Effettive del Mese')}
                   </h3>
-                  <p className="text-xs text-slate-500 mt-0.5">Sottrae le spese effettive direttamente dalla liquidità</p>
+                  <p className="text-xs text-slate-500 mt-0.5">{t('Sottrae le spese effettive direttamente dalla liquidità')}</p>
                 </div>
                 <button onClick={() => setExpenseConfirmDialog(null)} className="text-slate-400 hover:text-slate-700">
                   <X size={18} />
@@ -5354,7 +5483,7 @@ export default function PersonalFinanceDashboard() {
               <div className="space-y-4 mb-5">
                 <div>
                   <label className="text-xs text-slate-600 font-medium block mb-1.5 flex justify-between">
-                    <span>Spese Programmate e Ricorrenti (€)</span>
+                    <span>{t('Spese Programmate e Ricorrenti (€)')}</span>
                     <span className="text-[10px] text-slate-400">Stimato: {fmt(totalFixedExpenses + totalVariableExpenses)}</span>
                   </label>
                   <MoneyInput
@@ -5367,29 +5496,29 @@ export default function PersonalFinanceDashboard() {
 
                 <div>
                   <label className="text-xs text-slate-600 font-medium block mb-1.5">
-                    Spese Extra ed Extra-Budget del Mese (€)
+                    {t('Spese Extra ed Extra-Budget del Mese (€)')}
                   </label>
                   <MoneyInput
                     size="md"
                     value={expenseConfirmDialog.extra}
                     onChange={v => setExpenseConfirmDialog({ ...expenseConfirmDialog, extra: v })}
-                    placeholder="E.g. 50"
+                    placeholder={t('E.g. 50')}
                   />
-                  <p className="text-[10px] text-slate-400 mt-1">Svago straordinario, imprevisti, spese non preventivate</p>
+                  <p className="text-[10px] text-slate-400 mt-1">{t('Svago straordinario, imprevisti, spese non preventivate')}</p>
                 </div>
 
                 {totalAmt > 0 && (
                   <div className="bg-slate-50 rounded-xl p-3 border border-slate-100 space-y-2">
                     <div className="flex justify-between text-xs font-semibold text-slate-800">
-                      <span>Totale da Detrarre:</span>
+                      <span>{t('Totale da Detrarre:')}</span>
                       <span className="text-rose-600 tabular-nums">{fmt(totalAmt)}</span>
                     </div>
                     <div className="text-[10px] text-slate-500 leading-relaxed">
-                      L'importo verrà scalato dal waterfall di liquidità in ordine decrescente: prima dall'<strong>Overflow L4</strong>, poi dalla <strong>Liquidità Operativa L3</strong>, quindi da <strong>Lifestyle L2</strong> e infine da <strong>Emergenza L1</strong>.
+                      {t("L'importo verrà scalato dal waterfall di liquidità in ordine decrescente: prima dall'")}<strong>{t('Overflow L4')}</strong>{t(', poi dalla')} <strong>{t('Liquidità Operativa L3')}</strong>{t(', quindi da')} <strong>{t('Lifestyle L2')}</strong> {t('e infine da')} <strong>{t('Emergenza L1')}</strong>.
                     </div>
                     {totalAmt > totalLiq && (
                       <div className="text-[10px] text-rose-600 font-medium">
-                        ⚠️ Attenzione: supera la liquidità disponibile di {fmt(totalAmt - totalLiq)}. Il saldo residuo andrà a zero.
+                        {t('⚠️ Attenzione: supera la liquidità disponibile di {amount}. Il saldo residuo andrà a zero.', { amount: fmt(totalAmt - totalLiq) })}
                       </div>
                     )}
                   </div>
@@ -5397,7 +5526,7 @@ export default function PersonalFinanceDashboard() {
               </div>
 
               <div className="flex justify-end gap-2">
-                <Button variant="secondary" onClick={() => setExpenseConfirmDialog(null)}>Annulla</Button>
+                <Button variant="secondary" onClick={() => setExpenseConfirmDialog(null)}>{t('Annulla')}</Button>
                 <Button
                   variant="primary"
                   icon={Check}
@@ -5427,13 +5556,13 @@ export default function PersonalFinanceDashboard() {
                   <h3 className="text-base font-semibold text-slate-900 flex items-center gap-2">
                     <TrendingUp size={16} className="text-emerald-600" />Versamento volontario ETF
                   </h3>
-                  <p className="text-xs text-slate-500 mt-0.5">Preleva dalla liquidità e investi fuori dal PAC mensile</p>
+                  <p className="text-xs text-slate-500 mt-0.5">{t('Preleva dalla liquidità e investi fuori dal PAC mensile')}</p>
                 </div>
                 <button onClick={() => setShowVoluntary(false)} className="text-slate-400 hover:text-slate-700"><X size={18} /></button>
               </div>
 
               <div className="mb-4">
-                <label className="text-xs font-medium text-slate-700 block mb-1.5">Importo da investire</label>
+                <label className="text-xs font-medium text-slate-700 block mb-1.5">{t('Importo da investire')}</label>
                 <MoneyInput size="lg" value={voluntaryAmount} onChange={v => {
                   setVoluntaryAmount(v);
                   // Reset allocazione quando cambia importo
@@ -5449,7 +5578,7 @@ export default function PersonalFinanceDashboard() {
               {amt > 0 && (
                 <div className="bg-slate-50 rounded-xl p-3 mb-4">
                   <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 mb-2">
-                    Dove hai investito? Alloca {fmt(amt)}
+                    {t('Dove hai investito? Alloca {amount}', { amount: fmt(amt) })}
                   </p>
                   <div className="space-y-2">
                     {config.pac.instruments.map(ins => (
@@ -5463,7 +5592,7 @@ export default function PersonalFinanceDashboard() {
                     ))}
                   </div>
                   <div className="flex justify-between text-[11px] pt-2 mt-1 border-t border-slate-200">
-                    <span className="text-slate-500">Totale allocato</span>
+                    <span className="text-slate-500">{t('Totale allocato')}</span>
                     <span className={`font-semibold tabular-nums ${Math.abs(diff) < 1 ? 'text-emerald-600' : 'text-amber-600'}`}>
                       {fmt(allocTotal)} / {fmt(amt)}
                       {allocTotal > 0 && Math.abs(diff) >= 1 && <span className="ml-1">(mancano {fmt(diff)})</span>}
@@ -5473,7 +5602,7 @@ export default function PersonalFinanceDashboard() {
               )}
 
               <div className="flex justify-end gap-2">
-                <Button variant="secondary" onClick={() => setShowVoluntary(false)}>Annulla</Button>
+                <Button variant="secondary" onClick={() => setShowVoluntary(false)}>{t('Annulla')}</Button>
                 <Button variant="primary" icon={Check} disabled={!isValid || totalLiq < amt}
                   onClick={applyVoluntaryInvestment}>
                   Investi {amt > 0 ? fmt(amt) : ''}
@@ -5501,14 +5630,14 @@ export default function PersonalFinanceDashboard() {
                   <h3 className="text-base font-semibold text-slate-900 flex items-center gap-2">
                     <CreditCard size={16} className="text-indigo-600" />Conferma PAC
                   </h3>
-                  <p className="text-xs text-slate-500 mt-0.5">Inserisci l'importo effettivamente versato</p>
+                  <p className="text-xs text-slate-500 mt-0.5">{t("Inserisci l'importo effettivamente versato")}</p>
                 </div>
                 <button onClick={() => setPacConfirmDialog(null)} className="text-slate-400 hover:text-slate-700"><X size={18} /></button>
               </div>
 
               {/* Importo reale */}
               <div className="mb-4">
-                <label className="text-xs font-medium text-slate-700 block mb-1.5">Importo versato</label>
+                <label className="text-xs font-medium text-slate-700 block mb-1.5">{t('Importo versato')}</label>
                 <MoneyInput size="lg" value={pacConfirmDialog.actual}
                   onChange={v => setPacConfirmDialog({ ...pacConfirmDialog, actual: v })} />
                 <div className="flex items-center justify-between mt-1.5 text-[11px]">
@@ -5543,9 +5672,9 @@ export default function PersonalFinanceDashboard() {
               {excess > 0 && (
                 <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-3 mb-4">
                   <p className="text-[11px] font-semibold uppercase tracking-wider text-indigo-600 mb-0.5">
-                    Eccedenza {fmt(excess)} — dove l'hai versata? (opzionale)
+                    {t("Eccedenza {amount} — dove l'hai versata? (opzionale)", { amount: fmt(excess) })}
                   </p>
-                  <p className="text-[10px] text-indigo-500 mb-2">Lascia vuoto se hai seguito il piano standard</p>
+                  <p className="text-[10px] text-indigo-500 mb-2">{t('Lascia vuoto se hai seguito il piano standard')}</p>
                   <div className="space-y-1.5">
                     {config.pac.instruments.map(ins => (
                       <div key={ins.id} className="flex items-center gap-2">
@@ -5560,7 +5689,7 @@ export default function PersonalFinanceDashboard() {
                       </div>
                     ))}
                     <div className="flex justify-between text-[11px] pt-1 border-t border-indigo-200">
-                      <span className="text-indigo-600">Totale allocato</span>
+                      <span className="text-indigo-600">{t('Totale allocato')}</span>
                       <span className={`font-semibold tabular-nums ${Math.abs(excessDiff) < 1 ? 'text-emerald-600' : 'text-amber-600'}`}>
                         {fmt(excessAllocTotal)} / {fmt(excess)}
                         {excessAllocTotal > 0 && Math.abs(excessDiff) >= 1 && ` (mancano ${fmt(excessDiff)})`}
@@ -5571,7 +5700,7 @@ export default function PersonalFinanceDashboard() {
               )}
 
               <div className="flex justify-end gap-2">
-                <Button variant="secondary" onClick={() => setPacConfirmDialog(null)}>Annulla</Button>
+                <Button variant="secondary" onClick={() => setPacConfirmDialog(null)}>{t('Annulla')}</Button>
                 <Button variant="primary" icon={Check}
                   disabled={actualAmt <= 0 || (excess > 0 && excessAllocTotal > 0 && Math.abs(excessDiff) >= 1)}
                   onClick={() => {
@@ -5595,30 +5724,30 @@ export default function PersonalFinanceDashboard() {
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 bg-orange-100 text-orange-600 rounded-lg flex items-center justify-center"><Flame size={16} /></div>
                 <div>
-                  <h3 className="text-sm font-semibold text-slate-900">Obiettivo FIRE</h3>
-                  <p className="text-[11px] text-slate-500">Le milestone si aggiornano automaticamente</p>
+                  <h3 className="text-sm font-semibold text-slate-900">{t('Obiettivo FIRE')}</h3>
+                  <p className="text-[11px] text-slate-500">{t('Le milestone si aggiornano automaticamente')}</p>
                 </div>
               </div>
               <button onClick={() => setShowFireWizard(false)} className="text-slate-400 hover:text-slate-700"><X size={18} /></button>
             </div>
             <div className="space-y-4">
               <div>
-                <label className="text-xs font-medium text-slate-700 block mb-1.5">Età target per il FIRE</label>
+                <label className="text-xs font-medium text-slate-700 block mb-1.5">{t('Età target per il FIRE')}</label>
                 <input type="number" value={obRetireAge} onChange={e => setObRetireAge(e.target.value)}
                   min={30} max={70}
                   className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-300 bg-white" />
               </div>
               <div>
-                <label className="text-xs font-medium text-slate-700 block mb-1.5">Rendimento annuo atteso PAC (%)</label>
+                <label className="text-xs font-medium text-slate-700 block mb-1.5">{t('Rendimento annuo atteso PAC (%)')}</label>
                 <input type="number" value={obReturnRate} onChange={e => setObReturnRate(e.target.value)}
                   min={1} max={12} step={0.5}
                   className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-300 bg-white" />
                 <p className="text-[11px] text-slate-400 mt-1">Prudente 5% · Storico S&P 500 ≈ 7%</p>
               </div>
               <div>
-                <label className="text-xs font-medium text-slate-700 block mb-1.5">Rendita mensile desiderata (€)</label>
+                <label className="text-xs font-medium text-slate-700 block mb-1.5">{t('Rendita mensile desiderata (€)')}</label>
                 <input type="number" value={obMonthlyExpense} onChange={e => setObMonthlyExpense(e.target.value)}
-                  placeholder="es. 2000" min={0}
+                  placeholder={t('es. 2000')} min={0}
                   className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-300 bg-white" />
                 {obMonthlyExpense && (
                   <p className="text-[11px] text-orange-600 mt-1 font-medium">
@@ -5633,8 +5762,8 @@ export default function PersonalFinanceDashboard() {
                 )}
               </div>
               <div className="flex gap-2 pt-2">
-                <Button variant="secondary" className="flex-1" onClick={() => setShowFireWizard(false)}>Annulla</Button>
-                <Button variant="primary" className="flex-1" icon={Check} onClick={applyFireWizard}>Salva</Button>
+                <Button variant="secondary" className="flex-1" onClick={() => setShowFireWizard(false)}>{t('Annulla')}</Button>
+                <Button variant="primary" className="flex-1" icon={Check} onClick={applyFireWizard}>{t('Salva')}</Button>
               </div>
             </div>
           </div>
@@ -5649,42 +5778,42 @@ export default function PersonalFinanceDashboard() {
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 bg-indigo-100 text-indigo-600 rounded-lg flex items-center justify-center"><Trophy size={16} /></div>
                 <div>
-                  <h3 className="text-sm font-semibold text-slate-900">Nuovo Obiettivo</h3>
-                  <p className="text-[11px] text-slate-500">Definisci un traguardo patrimoniale</p>
+                  <h3 className="text-sm font-semibold text-slate-900">{t('Nuovo Obiettivo')}</h3>
+                  <p className="text-[11px] text-slate-500">{t('Definisci un traguardo patrimoniale')}</p>
                 </div>
               </div>
               <button onClick={() => setShowAddGoal(false)} className="text-slate-400 hover:text-slate-700"><X size={18} /></button>
             </div>
             <div className="space-y-4">
               <div>
-                <label className="text-xs font-medium text-slate-700 block mb-1.5">Titolo obiettivo</label>
-                <input type="text" value={newGoal.title} placeholder="es. Acquisto Auto, Fondo Vacanze..."
+                <label className="text-xs font-medium text-slate-700 block mb-1.5">{t('Titolo obiettivo')}</label>
+                <input type="text" value={newGoal.title} placeholder={t('es. Acquisto Auto, Fondo Vacanze...')}
                   onChange={e => setNewGoal({ ...newGoal, title: e.target.value })}
                   className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-300 bg-white" />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs font-medium text-slate-700 block mb-1.5">Target (€)</label>
-                  <input type="number" value={newGoal.targetAmount} placeholder="es. 15000"
+                  <label className="text-xs font-medium text-slate-700 block mb-1.5">{t('Target (€)')}</label>
+                  <input type="number" value={newGoal.targetAmount} placeholder={t('es. 15000')}
                     onChange={e => setNewGoal({ ...newGoal, targetAmount: e.target.value })}
                     className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-300 bg-white tabular-nums" />
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-slate-700 block mb-1.5">Attuale (€)</label>
-                  <input type="number" value={newGoal.currentAmount} placeholder="es. 2000"
+                  <label className="text-xs font-medium text-slate-700 block mb-1.5">{t('Attuale (€)')}</label>
+                  <input type="number" value={newGoal.currentAmount} placeholder={t('es. 2000')}
                     onChange={e => setNewGoal({ ...newGoal, currentAmount: e.target.value })}
                     className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-300 bg-white tabular-nums" />
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs font-medium text-slate-700 block mb-1.5">Scadenza</label>
+                  <label className="text-xs font-medium text-slate-700 block mb-1.5">{t('Scadenza')}</label>
                   <input type="date" value={newGoal.deadline}
                     onChange={e => setNewGoal({ ...newGoal, deadline: e.target.value })}
                     className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-300 bg-white" />
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-slate-700 block mb-1.5">Colore</label>
+                  <label className="text-xs font-medium text-slate-700 block mb-1.5">{t('Colore')}</label>
                   <div className="flex items-center gap-2 mt-1">
                     {['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ef4444'].map(c => (
                       <button key={c} onClick={() => setNewGoal({ ...newGoal, color: c })}
@@ -5695,8 +5824,8 @@ export default function PersonalFinanceDashboard() {
                 </div>
               </div>
               <div className="flex gap-2 pt-2">
-                <Button variant="secondary" className="flex-1" onClick={() => setShowAddGoal(false)}>Annulla</Button>
-                <Button variant="primary" className="flex-1" icon={Check} onClick={addGoal} disabled={!newGoal.title || !newGoal.targetAmount}>Aggiungi</Button>
+                <Button variant="secondary" className="flex-1" onClick={() => setShowAddGoal(false)}>{t('Annulla')}</Button>
+                <Button variant="primary" className="flex-1" icon={Check} onClick={addGoal} disabled={!newGoal.title || !newGoal.targetAmount}>{t('Aggiungi')}</Button>
               </div>
             </div>
           </div>
@@ -5711,8 +5840,8 @@ export default function PersonalFinanceDashboard() {
               <div className="flex items-center gap-2">
                 <div className="w-8 h-8 bg-emerald-100 text-emerald-700 rounded-lg flex items-center justify-center"><Receipt size={16} /></div>
                 <div>
-                  <h3 className="text-sm font-semibold text-slate-900">Registra Versamento Fon.Te.</h3>
-                  <p className="text-[11px] text-slate-500">I contributi aderente sono deducibili</p>
+                  <h3 className="text-sm font-semibold text-slate-900">{t('Registra Versamento Fon.Te.')}</h3>
+                  <p className="text-[11px] text-slate-500">{t('I contributi aderente sono deducibili')}</p>
                 </div>
               </div>
               <button onClick={() => setShowAddContrib(false)} className="text-slate-400 hover:text-slate-700"><X size={18} /></button>
@@ -5720,32 +5849,32 @@ export default function PersonalFinanceDashboard() {
             <div className="space-y-3.5">
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs font-medium text-slate-700 block mb-1">Anno</label>
+                  <label className="text-xs font-medium text-slate-700 block mb-1">{t('Anno')}</label>
                   <input type="number" value={newContrib.year}
                     onChange={e => setNewContrib({ ...newContrib, year: parseInt(e.target.value) || cy })}
                     className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white tabular-nums" />
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-slate-700 block mb-1">Trimestre</label>
+                  <label className="text-xs font-medium text-slate-700 block mb-1">{t('Trimestre')}</label>
                   <select value={newContrib.quarter}
                     onChange={e => setNewContrib({ ...newContrib, quarter: parseInt(e.target.value) || 1 })}
                     className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white">
-                    <option value={1}>Q1 (Gen-Mar)</option>
-                    <option value={2}>Q2 (Apr-Giu)</option>
-                    <option value={3}>Q3 (Lug-Set)</option>
-                    <option value={4}>Q4 (Ott-Dic)</option>
+                    <option value={1}>{t('Q1 (Gen-Mar)')}</option>
+                    <option value={2}>{t('Q2 (Apr-Giu)')}</option>
+                    <option value={3}>{t('Q3 (Lug-Set)')}</option>
+                    <option value={4}>{t('Q4 (Ott-Dic)')}</option>
                   </select>
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs font-medium text-slate-700 block mb-1">Quota Aderente (€)</label>
+                  <label className="text-xs font-medium text-slate-700 block mb-1">{t('Quota Aderente (€)')}</label>
                   <input type="number" value={newContrib.aderente} placeholder="0"
                     onChange={e => setNewContrib({ ...newContrib, aderente: e.target.value })}
                     className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white tabular-nums" />
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-slate-700 block mb-1">Quota Azienda (€)</label>
+                  <label className="text-xs font-medium text-slate-700 block mb-1">{t('Quota Azienda (€)')}</label>
                   <input type="number" value={newContrib.azienda} placeholder="0"
                     onChange={e => setNewContrib({ ...newContrib, azienda: e.target.value })}
                     className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white tabular-nums" />
@@ -5753,27 +5882,27 @@ export default function PersonalFinanceDashboard() {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs font-medium text-slate-700 block mb-1">TFR (€)</label>
+                  <label className="text-xs font-medium text-slate-700 block mb-1">{t('TFR (€)')}</label>
                   <input type="number" value={newContrib.tfr} placeholder="0"
                     onChange={e => setNewContrib({ ...newContrib, tfr: e.target.value })}
                     className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white tabular-nums" />
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-slate-700 block mb-1">Volontario (€)</label>
+                  <label className="text-xs font-medium text-slate-700 block mb-1">{t('Volontario (€)')}</label>
                   <input type="number" value={newContrib.volontario} placeholder="0"
                     onChange={e => setNewContrib({ ...newContrib, volontario: e.target.value })}
                     className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white tabular-nums" />
                 </div>
               </div>
               <div>
-                <label className="text-xs font-medium text-slate-700 block mb-1">Welfare (€)</label>
+                <label className="text-xs font-medium text-slate-700 block mb-1">{t('Welfare (€)')}</label>
                 <input type="number" value={newContrib.welfare} placeholder="0"
                   onChange={e => setNewContrib({ ...newContrib, welfare: e.target.value })}
                   className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white tabular-nums" />
               </div>
               <div className="flex gap-2 pt-2">
-                <Button variant="secondary" className="flex-1" onClick={() => setShowAddContrib(false)}>Annulla</Button>
-                <Button variant="primary" className="flex-1" icon={Check} onClick={addFonteContribution}>Registra</Button>
+                <Button variant="secondary" className="flex-1" onClick={() => setShowAddContrib(false)}>{t('Annulla')}</Button>
+                <Button variant="primary" className="flex-1" icon={Check} onClick={addFonteContribution}>{t('Registra')}</Button>
               </div>
             </div>
           </div>
@@ -5830,7 +5959,7 @@ export default function PersonalFinanceDashboard() {
         // Milestones
         const milestonesList = [
           {
-            label: "Primo anno di PAC completato",
+            label: t("Primo anno di PAC completato"),
             progress: config.pac.monthlyAmount > 0 && state.snapshots.length >= 12 ? 100 : Math.min(100, (state.snapshots.length / 12) * 100),
             targetYear: currentYear
           }
@@ -5870,44 +5999,44 @@ export default function PersonalFinanceDashboard() {
             
             {/* PAGINA 1: COVER PAGE */}
             <div className="pdf-page pdf-sans flex flex-col justify-between border-[12px] border-double border-[#0f1923] p-12">
-              <div className="pdf-watermark select-none">Riservato e confidenziale</div>
+              <div className="pdf-watermark select-none">{t('Riservato e confidenziale')}</div>
               
               <div className="text-center mt-12">
                 <div className="w-20 h-20 bg-[#0f1923] rounded-3xl flex items-center justify-center text-white mx-auto shadow-lg mb-8 border-2 border-[#c9a84c]">
                   <TrendingUp size={42} strokeWidth={1.8} className="text-[#c9a84c]" />
                 </div>
-                <h1 className="pdf-serif text-4xl font-extrabold tracking-widest text-[#0f1923] uppercase">Report Finanziario Personale</h1>
+                <h1 className="pdf-serif text-4xl font-extrabold tracking-widest text-[#0f1923] uppercase">{t('Report Finanziario Personale')}</h1>
                 <p className="text-xs font-semibold tracking-widest text-slate-500 uppercase mt-3">Wealth Management & Pianificazione Strategica</p>
                 <div className="w-32 h-0.5 bg-[#c9a84c] mx-auto mt-6" />
               </div>
 
               <div className="text-center my-auto bg-slate-50/50 border border-slate-100 rounded-2xl p-8 max-w-lg mx-auto">
-                <p className="text-[10px] uppercase font-bold tracking-widest text-slate-400 mb-1">Patrimonio Netto Complessivo</p>
+                <p className="text-[10px] uppercase font-bold tracking-widest text-slate-400 mb-1">{t('Patrimonio Netto Complessivo')}</p>
                 <h2 className="pdf-serif text-5xl font-black text-[#0f1923] tabular-nums">{fmt(netWorth)}</h2>
                 
                 <div className="mt-8 grid grid-cols-3 gap-4 text-xs border-t border-slate-200/60 pt-6">
                   <div>
-                    <span className="text-slate-400 uppercase tracking-wider block font-semibold text-[8px] mb-1">Portafoglio PAC</span>
+                    <span className="text-slate-400 uppercase tracking-wider block font-semibold text-[8px] mb-1">{t('Portafoglio PAC')}</span>
                     <span className="font-extrabold text-slate-800 text-sm">{fmt(state.etfValue)}</span>
                   </div>
                   <div>
-                    <span className="text-slate-400 uppercase tracking-wider block font-semibold text-[8px] mb-1">Previdenza</span>
+                    <span className="text-slate-400 uppercase tracking-wider block font-semibold text-[8px] mb-1">{t('Previdenza')}</span>
                     <span className="font-extrabold text-slate-800 text-sm">{fmt(state.fonteValue)}</span>
                   </div>
                   <div>
-                    <span className="text-slate-400 uppercase tracking-wider block font-semibold text-[8px] mb-1">Liquidità</span>
+                    <span className="text-slate-400 uppercase tracking-wider block font-semibold text-[8px] mb-1">{t('Liquidità')}</span>
                     <span className="font-extrabold text-slate-800 text-sm">{fmt(totalLiq)}</span>
                   </div>
                 </div>
               </div>
 
               <div className="text-center border-t border-slate-100 pt-6">
-                <p className="text-xs font-bold text-slate-800 pdf-serif">Preparato per: <span className="pdf-gold-text text-sm">{config.profile.name || 'Utente'}</span></p>
-                <p className="text-[9px] text-slate-500 mt-1 font-medium">Data di Generazione: {todayStr}</p>
+                <p className="text-xs font-bold text-slate-800 pdf-serif">{t('Preparato per:')} <span className="pdf-gold-text text-sm">{config.profile.name || 'Utente'}</span></p>
+                <p className="text-[9px] text-slate-500 mt-1 font-medium">{t('Data di Generazione: {date}', { date: todayStr })}</p>
                 {state.etfValueUpdatedAt ? (
-                  <p className="text-[8.5px] text-slate-400 mt-0.5">Valori patrimoniali aggiornati: {formatRelativeTime(state.etfValueUpdatedAt)}</p>
+                  <p className="text-[8.5px] text-slate-400 mt-0.5">Valori patrimoniali aggiornati: {formatRelativeTime(state.etfValueUpdatedAt, t)}</p>
                 ) : (
-                  <p className="text-[8.5px] text-slate-400 mt-0.5">Valori patrimoniali aggiornati: —</p>
+                  <p className="text-[8.5px] text-slate-400 mt-0.5">{t('Valori patrimoniali aggiornati: —')}</p>
                 )}
                 
                 <div className="mt-6 bg-[#0f1923] text-white border border-[#c9a84c] rounded-xl px-5 py-2.5 max-w-sm mx-auto text-[9px] tracking-wider uppercase font-black">
@@ -5918,25 +6047,25 @@ export default function PersonalFinanceDashboard() {
 
             {/* PAGINA 2: PATRIMONIO & STRUTTURA WATERFALL */}
             <div className="pdf-page pdf-sans flex flex-col justify-between">
-              <div className="pdf-watermark select-none">Riservato e confidenziale</div>
+              <div className="pdf-watermark select-none">{t('Riservato e confidenziale')}</div>
               
               <div>
                 {/* Header */}
                 <div className="flex justify-between items-center border-b-2 border-[#0f1923] pb-2 mb-5 text-[9px] text-slate-500 uppercase tracking-wider">
-                  <span className="font-extrabold text-[#0f1923] pdf-serif">Report Finanziario Personale</span>
+                  <span className="font-extrabold text-[#0f1923] pdf-serif">{t('Report Finanziario Personale')}</span>
                   <span className="font-semibold">Sezione 1 & 2 · {todayStr}</span>
                 </div>
 
                 {/* SEZIONE 1: PATRIMONIO TOTALE */}
                 <div className="mb-6">
                   <h3 className="pdf-serif text-sm font-black text-[#0f1923] uppercase tracking-wider mb-3 pb-1 border-b border-slate-100 flex justify-between items-center">
-                    <span>SEZIONE 1 — PATRIMONIO TOTALE</span>
+                    <span>{t('SEZIONE 1 — PATRIMONIO TOTALE')}</span>
                     <span className="text-[10px] text-slate-400 lowercase font-normal italic">Rif: {todayStr}</span>
                   </h3>
                   
                   <div className="grid grid-cols-3 gap-4 mb-4">
                     <div className="col-span-1 bg-slate-50 border border-slate-100 rounded-xl p-3.5 flex flex-col justify-center">
-                      <span className="text-[8px] font-bold text-slate-400 uppercase tracking-wider block mb-1">Patrimonio Complessivo</span>
+                      <span className="text-[8px] font-bold text-slate-400 uppercase tracking-wider block mb-1">{t('Patrimonio Complessivo')}</span>
                       <span className="pdf-serif text-xl font-black text-[#c9a84c] tabular-nums">{fmt(netWorth)}</span>
                     </div>
                     
@@ -5944,19 +6073,19 @@ export default function PersonalFinanceDashboard() {
                       <table className="pdf-table">
                         <thead>
                           <tr>
-                            <th>Macro-Categoria</th>
-                            <th className="text-right">Allocazione €</th>
-                            <th className="text-right">Peso %</th>
+                            <th>{t('Macro-Categoria')}</th>
+                            <th className="text-right">{t('Allocazione €')}</th>
+                            <th className="text-right">{t('Peso %')}</th>
                           </tr>
                         </thead>
                         <tbody>
                           <tr>
-                            <td className="font-semibold">Liquidità Totale (Somma buffer)</td>
+                            <td className="font-semibold">{t('Liquidità Totale (Somma buffer)')}</td>
                             <td className="text-right tabular-nums">{fmt(totalLiq)}</td>
                             <td className="text-right tabular-nums">{((totalLiq / (netWorth || 1)) * 100).toFixed(1)}%</td>
                           </tr>
                           <tr>
-                            <td className="font-semibold">Portafoglio Investimenti PAC</td>
+                            <td className="font-semibold">{t('Portafoglio Investimenti PAC')}</td>
                             <td className="text-right tabular-nums">{fmt(state.etfValue)}</td>
                             <td className="text-right tabular-nums">{((state.etfValue / (netWorth || 1)) * 100).toFixed(1)}%</td>
                           </tr>
@@ -5966,7 +6095,7 @@ export default function PersonalFinanceDashboard() {
                             <td className="text-right tabular-nums">{((state.fonteValue / (netWorth || 1)) * 100).toFixed(1)}%</td>
                           </tr>
                           <tr>
-                            <td className="font-semibold">Altro (Immobiliare, Altro)</td>
+                            <td className="font-semibold">{t('Altro (Immobiliare, Altro)')}</td>
                             <td className="text-right tabular-nums">{fmt(0)}</td>
                             <td className="text-right tabular-nums">0.0%</td>
                           </tr>
@@ -5982,15 +6111,15 @@ export default function PersonalFinanceDashboard() {
                     const fontePct = (state.fonteValue / (netWorth || 1)) * 100;
                     return (
                       <div className="bg-slate-50 border border-slate-100 rounded-xl p-3">
-                        <span className="text-[8px] font-bold text-slate-400 uppercase tracking-wider block mb-2">Ripartizione Proporzionale Asset</span>
+                        <span className="text-[8px] font-bold text-slate-400 uppercase tracking-wider block mb-2">{t('Ripartizione Proporzionale Asset')}</span>
                         <div className="flex h-3.5 rounded-md overflow-hidden border border-slate-200">
                           {liqPct > 0 && <div className="bg-amber-400 h-full" style={{ width: `${liqPct}%` }} />}
                           {etfPct > 0 && <div className="bg-blue-600 h-full" style={{ width: `${etfPct}%` }} />}
                           {fontePct > 0 && <div className="bg-purple-600 h-full" style={{ width: `${fontePct}%` }} />}
                         </div>
                         <div className="flex justify-between items-center text-[8.5px] text-slate-500 mt-2">
-                          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-400" /> Liquidità: <strong>{liqPct.toFixed(1)}%</strong></span>
-                          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-600" /> Portafoglio PAC: <strong>{etfPct.toFixed(1)}%</strong></span>
+                          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-400" /> {t('Liquidità:')} <strong>{liqPct.toFixed(1)}%</strong></span>
+                          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-blue-600" /> {t('Portafoglio PAC:')} <strong>{etfPct.toFixed(1)}%</strong></span>
                           <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-purple-600" /> {config.fonte.name || 'Fondo Pensione'}: <strong>{fontePct.toFixed(1)}%</strong></span>
                         </div>
                       </div>
@@ -6001,17 +6130,17 @@ export default function PersonalFinanceDashboard() {
                 {/* SEZIONE 2: STRUTTURA BUFFER DI LIQUIDITÀ */}
                 <div>
                   <h3 className="pdf-serif text-sm font-black text-[#0f1923] uppercase tracking-wider mb-3 pb-1 border-b border-slate-100">
-                    SEZIONE 2 — STRUTTURA BUFFER DI LIQUIDITÀ
+                    {t('SEZIONE 2 — STRUTTURA BUFFER DI LIQUIDITÀ')}
                   </h3>
                   
                   <table className="pdf-table">
                     <thead>
                       <tr>
-                        <th style={{ width: '8%' }}>Livello</th>
-                        <th style={{ width: '22%' }}>Destinazione</th>
-                        <th style={{ width: '15%' }} className="text-right">Allocazione €</th>
-                        <th style={{ width: '15%' }} className="text-right">Cap</th>
-                        <th style={{ width: '40%' }}>Funzione Strategica</th>
+                        <th style={{ width: '8%' }}>{t('Livello')}</th>
+                        <th style={{ width: '22%' }}>{t('Destinazione')}</th>
+                        <th style={{ width: '15%' }} className="text-right">{t('Allocazione €')}</th>
+                        <th style={{ width: '15%' }} className="text-right">{t('Cap')}</th>
+                        <th style={{ width: '40%' }}>{t('Funzione Strategica')}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -6038,18 +6167,18 @@ export default function PersonalFinanceDashboard() {
               {/* Footer */}
               <div className="pdf-footer">
                 <span className="pdf-sans font-medium uppercase tracking-wider text-[7px] text-slate-400">Generato da: {config.profile.name || 'Utente'} · {todayStr}</span>
-                <span className="pdf-sans font-bold text-slate-800">Pagina 2 di 5</span>
+                <span className="pdf-sans font-bold text-slate-800">{t('Pagina 2 di 5')}</span>
               </div>
             </div>
 
             {/* PAGINA 3: ANALISI PAC & PREVIDENZA FON.TE */}
             <div className="pdf-page pdf-sans flex flex-col justify-between">
-              <div className="pdf-watermark select-none">Riservato e confidenziale</div>
+              <div className="pdf-watermark select-none">{t('Riservato e confidenziale')}</div>
               
               <div>
                 {/* Header */}
                 <div className="flex justify-between items-center border-b-2 border-[#0f1923] pb-2 mb-5 text-[9px] text-slate-500 uppercase tracking-wider">
-                  <span className="font-extrabold text-[#0f1923] pdf-serif">Report Finanziario Personale</span>
+                  <span className="font-extrabold text-[#0f1923] pdf-serif">{t('Report Finanziario Personale')}</span>
                   <span className="font-semibold">Sezione 3 & 4 · {todayStr}</span>
                 </div>
 
@@ -6062,20 +6191,20 @@ export default function PersonalFinanceDashboard() {
                   <table className="pdf-table mb-3">
                     <thead>
                       <tr>
-                        <th style={{ width: '35%' }}>ETF Strumento</th>
-                        <th style={{ width: '15%' }}>ISIN</th>
-                        <th style={{ width: '20%' }}>Esposizione</th>
-                        <th style={{ width: '10%' }} className="text-right">Peso %</th>
-                        <th style={{ width: '10%' }} className="text-right">Versam./m</th>
-                        <th style={{ width: '10%' }} className="text-right">TER</th>
-                        <th style={{ width: '10%' }} className="text-right">Valore €</th>
+                        <th style={{ width: '35%' }}>{t('ETF Strumento')}</th>
+                        <th style={{ width: '15%' }}>{t('ISIN')}</th>
+                        <th style={{ width: '20%' }}>{t('Esposizione')}</th>
+                        <th style={{ width: '10%' }} className="text-right">{t('Peso %')}</th>
+                        <th style={{ width: '10%' }} className="text-right">{t('Versam./m')}</th>
+                        <th style={{ width: '10%' }} className="text-right">{t('TER')}</th>
+                        <th style={{ width: '10%' }} className="text-right">{t('Valore €')}</th>
                       </tr>
                     </thead>
                     <tbody>
                       {(!config.pac.instruments || config.pac.instruments.length === 0) ? (
                         <tr>
                           <td colSpan={7} className="text-center py-4 text-slate-400 italic text-[10px]">
-                            Nessuno strumento configurato nel PAC
+                            {t('Nessuno strumento configurato nel PAC')}
                           </td>
                         </tr>
                       ) : (
@@ -6104,9 +6233,9 @@ export default function PersonalFinanceDashboard() {
                         })
                       )}
                       <tr className="bg-slate-100 font-extrabold border-t border-slate-300">
-                        <td className="pdf-serif text-[#0f1923]">Totale Portafoglio</td>
+                        <td className="pdf-serif text-[#0f1923]">{t('Totale Portafoglio')}</td>
                         <td>-</td>
-                        <td>Diversificato</td>
+                        <td>{t('Diversificato')}</td>
                         <td className="text-right tabular-nums">100%</td>
                         <td className="text-right tabular-nums">{fmt(config.pac.monthlyAmount)}</td>
                         <td className="text-right tabular-nums">{weightedTer.toFixed(2)}%</td>
@@ -6118,7 +6247,7 @@ export default function PersonalFinanceDashboard() {
                   {config.pac.instruments && config.pac.instruments.length > 0 ? (
                     <div className="bg-blue-50/50 border border-blue-200/60 rounded-xl p-2.5 text-[8.5px] text-[#0f1923] flex items-center gap-2">
                       <span className="text-xs">💡</span>
-                      <span className="font-medium"><strong>Nota strategica di allocazione:</strong> Asset allocation target composta da {config.pac.instruments.length} strumenti PAC con TER medio ponderato pari a {weightedTer.toFixed(2)}%.</span>
+                      <span className="font-medium"><strong>{t('Nota strategica di allocazione:')}</strong> {t('Asset allocation target composta da {count} strumenti PAC con TER medio ponderato pari a {ter}%.', { count: config.pac.instruments.length, ter: weightedTer.toFixed(2) })}</span>
                     </div>
                   ) : null}
                 </div>
@@ -6132,42 +6261,42 @@ export default function PersonalFinanceDashboard() {
                   <div className="grid grid-cols-3 gap-4">
                     <div className="bg-slate-50 border border-slate-100 rounded-xl p-3 text-xs space-y-2">
                       <div className="border-b border-slate-200/60 pb-1.5">
-                        <span className="text-[7.5px] text-slate-400 font-bold uppercase block">Fondo Pensione</span>
+                        <span className="text-[7.5px] text-slate-400 font-bold uppercase block">{t('Fondo Pensione')}</span>
                         <strong className="text-slate-800">Fondo {config.fonte.name || 'Pensione'} ({config.fonte.allocation || 'Personalizzato'})</strong>
                       </div>
                       <div className="border-b border-slate-200/60 pb-1.5">
-                        <span className="text-[7.5px] text-slate-400 font-bold uppercase block">Comparto Attivo</span>
+                        <span className="text-[7.5px] text-slate-400 font-bold uppercase block">{t('Comparto Attivo')}</span>
                         <strong className="text-slate-800">{config.fonte.comparto || 'Dinamico / Crescita'}</strong>
                       </div>
                       <div>
-                        <span className="text-[7.5px] text-slate-400 font-bold uppercase block">TER OCF Annuo</span>
-                        <strong className="text-rose-600">{config.fonte.ter || 0.15}% / anno</strong>
+                        <span className="text-[7.5px] text-slate-400 font-bold uppercase block">{t('TER OCF Annuo')}</span>
+                        <strong className="text-rose-600">{config.fonte.ter || 0.15}% / {t('anno')}</strong>
                       </div>
                     </div>
                     
                     <div className="bg-slate-50 border border-slate-100 rounded-xl p-3 text-xs space-y-2">
                       <div className="flex justify-between border-b border-slate-200/60 pb-1.5">
-                        <span className="text-slate-500">Posizione Maturata:</span>
+                        <span className="text-slate-500">{t('Posizione Maturata:')}</span>
                         <strong className="text-slate-800 tabular-nums">{fmt(state.fonteValue)}</strong>
                       </div>
                       <div className="flex justify-between border-b border-slate-200/60 pb-1.5">
-                        <span className="text-slate-500">Versamento/mese:</span>
+                        <span className="text-slate-500">{t('Versamento/mese:')}</span>
                         <strong className="text-slate-800 tabular-nums">{fmt(fonteContrib)}</strong>
                       </div>
                       <div className="text-[8.5px] text-slate-500 leading-normal">
-                        Ripartizione e versamenti effettuati per il fondo previdenziale <strong>{config.fonte.name || 'Pensione'}</strong>. I contributi accumulati beneficiano della deducibilità fiscale.
+                        {t('Ripartizione e versamenti effettuati per il fondo previdenziale')} <strong>{config.fonte.name || 'Pensione'}</strong>. {t('I contributi accumulati beneficiano della deducibilità fiscale.')}
                       </div>
                     </div>
 
                     <div className="bg-[#0f1923] text-white border border-[#c9a84c] rounded-xl p-3 text-xs space-y-2 flex flex-col justify-between">
                       <div>
-                        <span className="text-[7.5px] text-slate-400 font-bold uppercase block">Proiezione a 65 anni</span>
+                        <span className="text-[7.5px] text-slate-400 font-bold uppercase block">{t('Proiezione a 65 anni')}</span>
                         <strong className="text-[#c9a84c] text-sm tabular-nums block mt-0.5">{fmt(projectedFonte)}</strong>
-                        <p className="text-[7.5px] text-slate-400 mt-0.5">Calcolato a rendimento 3.0% reale netto</p>
+                        <p className="text-[7.5px] text-slate-400 mt-0.5">{t('Calcolato a rendimento 3.0% reale netto')}</p>
                       </div>
                       <div className="border-t border-slate-700/60 pt-1.5">
-                        <span className="text-[7.5px] text-slate-400 font-bold uppercase block">Rendita Mensile Vitalizia Stimata</span>
-                        <strong className="text-emerald-400 text-sm tabular-nums block mt-0.5">{fmt(monthlyAnnuity)} / mese</strong>
+                        <span className="text-[7.5px] text-slate-400 font-bold uppercase block">{t('Rendita Mensile Vitalizia Stimata')}</span>
+                        <strong className="text-emerald-400 text-sm tabular-nums block mt-0.5">{fmt(monthlyAnnuity)} / {t('mese')}</strong>
                       </div>
                     </div>
                   </div>
@@ -6175,12 +6304,12 @@ export default function PersonalFinanceDashboard() {
                   {fonteDeducibility && (
                     <div className="mt-3 bg-slate-50 border border-slate-200/60 rounded-xl p-3 text-xs flex justify-between items-center">
                       <div className="text-[9px] text-slate-500 leading-relaxed">
-                        💰 <strong>Ottimizzazione Fiscale Rigo E27:</strong> Versamento annuo deducibile (tetto €5.164,57).
-                        RAL dichiarata: <strong>{fmt(fonteDeducibility.ral)}</strong> con aliquota marginale al <strong>{fonteDeducibility.marginalRate}%</strong>.
+                        💰 <strong>{t('Ottimizzazione Fiscale Rigo E27:')}</strong> Versamento annuo deducibile (tetto €5.164,57).
+                        RAL dichiarata: <strong>{fmt(fonteDeducibility.ral)}</strong> {t('con aliquota marginale al')} <strong>{fonteDeducibility.marginalRate}%</strong>.
                       </div>
                       <div className="text-right">
-                        <span className="text-[7.5px] text-slate-400 font-bold uppercase block">Risparmio d'Imposta IRPEF</span>
-                        <span className="font-extrabold text-blue-700 tabular-nums">{fmt(fonteDeducibility.taxSaving)} / anno</span>
+                        <span className="text-[7.5px] text-slate-400 font-bold uppercase block">{t("Risparmio d'Imposta IRPEF")}</span>
+                        <span className="font-extrabold text-blue-700 tabular-nums">{fmt(fonteDeducibility.taxSaving)} / {t('anno')}</span>
                       </div>
                     </div>
                   )}
@@ -6190,86 +6319,86 @@ export default function PersonalFinanceDashboard() {
               {/* Footer */}
               <div className="pdf-footer">
                 <span className="pdf-sans font-medium uppercase tracking-wider text-[7px] text-slate-400">Generato da: {config.profile.name || 'Utente'} · {todayStr}</span>
-                <span className="pdf-sans font-bold text-slate-800">Pagina 3 di 5</span>
+                <span className="pdf-sans font-bold text-slate-800">{t('Pagina 3 di 5')}</span>
               </div>
             </div>
 
             {/* PAGINA 4: SCENARI FIRE & TRAGUARDI MILESTONE */}
             <div className="pdf-page pdf-sans flex flex-col justify-between">
-              <div className="pdf-watermark select-none">Riservato e confidenziale</div>
+              <div className="pdf-watermark select-none">{t('Riservato e confidenziale')}</div>
               
               <div>
                 {/* Header */}
                 <div className="flex justify-between items-center border-b-2 border-[#0f1923] pb-2 mb-5 text-[9px] text-slate-500 uppercase tracking-wider">
-                  <span className="font-extrabold text-[#0f1923] pdf-serif">Report Finanziario Personale</span>
+                  <span className="font-extrabold text-[#0f1923] pdf-serif">{t('Report Finanziario Personale')}</span>
                   <span className="font-semibold">Sezione 5 & 6 · {todayStr}</span>
                 </div>
 
                 {/* SEZIONE 5: PIANO FIRE — SCENARI DI INDIPENDENZA */}
                 <div className="mb-6">
                   <h3 className="pdf-serif text-sm font-black text-[#0f1923] uppercase tracking-wider mb-2 pb-1 border-b border-slate-100">
-                    SEZIONE 5 — PIANO FIRE — SCENARI DI INDIPENDENZA FINANZIARIA
+                    {t('SEZIONE 5 — PIANO FIRE — SCENARI DI INDIPENDENZA FINANZIARIA')}
                   </h3>
                   
                   <p className="text-[8.5px] text-slate-500 mb-3 leading-relaxed">
-                    Analisi basata sul patrimonio investito totale attuale di <strong>{fmt(state.etfValue + state.fonteValue)}</strong> e un risparmio fisso mensile teorico costante di <strong>{fmt(config.pac.monthlyAmount || 1000)}</strong> per l'intero periodo di accumulo, calcolata ad un tasso reale fisso.
+                    {t('Analisi basata sul patrimonio investito totale attuale di')} <strong>{fmt(state.etfValue + state.fonteValue)}</strong> {t('e un risparmio fisso mensile teorico costante di')} <strong>{fmt(config.pac.monthlyAmount || 1000)}</strong> {t("per l'intero periodo di accumulo, calcolata ad un tasso reale fisso.")}
                   </p>
 
                   <table className="pdf-table">
                     <thead>
                       <tr>
-                        <th>Scenario Analizzato</th>
-                        <th className="text-right">Target FIRE €</th>
-                        <th className="text-center">Resa Reale</th>
-                        <th className="text-right">Anni al Traguardo</th>
-                        <th className="text-right">Età al FIRE</th>
-                        <th className="text-right">Rendita Annua (4%)</th>
-                        <th className="text-right">Rendita Mensile</th>
+                        <th>{t('Scenario Analizzato')}</th>
+                        <th className="text-right">{t('Target FIRE €')}</th>
+                        <th className="text-center">{t('Resa Reale')}</th>
+                        <th className="text-right">{t('Anni al Traguardo')}</th>
+                        <th className="text-right">{t('Età al FIRE')}</th>
+                        <th className="text-right">{t('Rendita Annua (4%)')}</th>
+                        <th className="text-right">{t('Rendita Mensile')}</th>
                       </tr>
                     </thead>
                     <tbody>
                       <tr>
-                        <td className="font-semibold">Scenario Conservativo</td>
+                        <td className="font-semibold">{t('Scenario Conservativo')}</td>
                         <td className="text-right tabular-nums">{fmt(scConservativo.target)}</td>
                         <td className="text-center text-slate-500 font-medium">5.0%</td>
                         <td className="text-right tabular-nums">{scConservativo.years.toFixed(1)}a</td>
-                        <td className="text-right tabular-nums">{Math.round(scConservativo.age)} anni</td>
+                        <td className="text-right tabular-nums">{t('{age} anni', { age: Math.round(scConservativo.age) })}</td>
                         <td className="text-right tabular-nums">{fmt(scConservativo.annual)}</td>
                         <td className="text-right tabular-nums font-semibold text-slate-800">{fmt(scConservativo.monthly)}</td>
                       </tr>
                       <tr style={{ backgroundColor: '#fef3c7' }}>
-                        <td className="font-extrabold text-[#0f1923] flex items-center gap-1">🌟 Scenario Base (Rif.)</td>
+                        <td className="font-extrabold text-[#0f1923] flex items-center gap-1">{t('🌟 Scenario Base (Rif.)')}</td>
                         <td className="text-right tabular-nums font-bold text-[#0f1923]">{fmt(scBase.target)}</td>
                         <td className="text-center text-[#0f1923] font-bold">7.0%</td>
                         <td className="text-right tabular-nums font-bold text-[#0f1923]">{scBase.years.toFixed(1)}a</td>
-                        <td className="text-right tabular-nums font-bold text-[#0f1923]">{Math.round(scBase.age)} anni</td>
+                        <td className="text-right tabular-nums font-bold text-[#0f1923]">{t('{age} anni', { age: Math.round(scBase.age) })}</td>
                         <td className="text-right tabular-nums font-bold text-[#0f1923]">{fmt(scBase.annual)}</td>
                         <td className="text-right tabular-nums font-extrabold text-[#c9a84c]">{fmt(scBase.monthly)}</td>
                       </tr>
                       <tr>
-                        <td className="font-semibold">Scenario Ottimistico</td>
+                        <td className="font-semibold">{t('Scenario Ottimistico')}</td>
                         <td className="text-right tabular-nums">{fmt(scOttimistico.target)}</td>
                         <td className="text-center text-slate-500 font-medium">9.0%</td>
                         <td className="text-right tabular-nums">{scOttimistico.years.toFixed(1)}a</td>
-                        <td className="text-right tabular-nums">{Math.round(scOttimistico.age)} anni</td>
+                        <td className="text-right tabular-nums">{t('{age} anni', { age: Math.round(scOttimistico.age) })}</td>
                         <td className="text-right tabular-nums">{fmt(scOttimistico.annual)}</td>
                         <td className="text-right tabular-nums font-semibold text-slate-800">{fmt(scOttimistico.monthly)}</td>
                       </tr>
                       <tr>
-                        <td className="font-semibold text-blue-700">Lean FIRE (Essenziale)</td>
+                        <td className="font-semibold text-blue-700">{t('Lean FIRE (Essenziale)')}</td>
                         <td className="text-right tabular-nums">{fmt(scLean.target)}</td>
                         <td className="text-center text-slate-500 font-medium">7.0%</td>
                         <td className="text-right tabular-nums">{scLean.years.toFixed(1)}a</td>
-                        <td className="text-right tabular-nums">{Math.round(scLean.age)} anni</td>
+                        <td className="text-right tabular-nums">{t('{age} anni', { age: Math.round(scLean.age) })}</td>
                         <td className="text-right tabular-nums">{fmt(scLean.annual)}</td>
                         <td className="text-right tabular-nums font-semibold text-slate-800">{fmt(scLean.monthly)}</td>
                       </tr>
                       <tr>
-                        <td className="font-semibold text-indigo-700">Fat FIRE (Premium Style)</td>
+                        <td className="font-semibold text-indigo-700">{t('Fat FIRE (Premium Style)')}</td>
                         <td className="text-right tabular-nums">{fmt(scFat.target)}</td>
                         <td className="text-center text-slate-500 font-medium">7.0%</td>
                         <td className="text-right tabular-nums">{scFat.years.toFixed(1)}a</td>
-                        <td className="text-right tabular-nums">{Math.round(scFat.age)} anni</td>
+                        <td className="text-right tabular-nums">{t('{age} anni', { age: Math.round(scFat.age) })}</td>
                         <td className="text-right tabular-nums">{fmt(scFat.annual)}</td>
                         <td className="text-right tabular-nums font-semibold text-slate-800">{fmt(scFat.monthly)}</td>
                       </tr>
@@ -6286,9 +6415,9 @@ export default function PersonalFinanceDashboard() {
                   <table className="pdf-table">
                     <thead>
                       <tr>
-                        <th style={{ width: '45%' }}>Traguardo / Milestone</th>
-                        <th style={{ width: '25%' }} className="text-center">Stato Avanzamento</th>
-                        <th style={{ width: '30%' }}>Progresso Grafico</th>
+                        <th style={{ width: '45%' }}>{t('Traguardo / Milestone')}</th>
+                        <th style={{ width: '25%' }} className="text-center">{t('Stato Avanzamento')}</th>
+                        <th style={{ width: '30%' }}>{t('Progresso Grafico')}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -6300,9 +6429,9 @@ export default function PersonalFinanceDashboard() {
                             <td className="font-semibold text-slate-800">{m.label}</td>
                             <td className="text-center font-bold">
                               {isReached ? (
-                                <span className="text-emerald-700 text-[8.5px]">✓ RAGGIUNTO (Anno {m.targetYear})</span>
+                                <span className="text-emerald-700 text-[8.5px]">{t('✓ RAGGIUNTO (Anno {year})', { year: m.targetYear })}</span>
                               ) : isZero ? (
-                                <span className="text-slate-400 text-[7.5px] uppercase">Futuro (Anno {m.targetYear})</span>
+                                <span className="text-slate-400 text-[7.5px] uppercase">{t('Futuro (Anno {year})', { year: m.targetYear })}</span>
                               ) : (
                                 <span className="text-blue-700 text-[8px]">IN ACCUMULO ({m.progress.toFixed(0)}%)</span>
                               )}
@@ -6323,18 +6452,18 @@ export default function PersonalFinanceDashboard() {
               {/* Footer */}
               <div className="pdf-footer">
                 <span className="pdf-sans font-medium uppercase tracking-wider text-[7px] text-slate-400">Generato da: {config.profile.name || 'Utente'} · {todayStr}</span>
-                <span className="pdf-sans font-bold text-slate-800">Pagina 4 di 5</span>
+                <span className="pdf-sans font-bold text-slate-800">{t('Pagina 4 di 5')}</span>
               </div>
             </div>
 
             {/* PAGINA 5: ANALISI AVANZATA & ANALYTICS */}
             <div className="pdf-page pdf-sans flex flex-col justify-between">
-              <div className="pdf-watermark select-none">Riservato e confidenziale</div>
+              <div className="pdf-watermark select-none">{t('Riservato e confidenziale')}</div>
               
               <div>
                 {/* Header */}
                 <div className="flex justify-between items-center border-b-2 border-[#0f1923] pb-2 mb-5 text-[9px] text-slate-500 uppercase tracking-wider">
-                  <span className="font-extrabold text-[#0f1923] pdf-serif">Report Finanziario Personale</span>
+                  <span className="font-extrabold text-[#0f1923] pdf-serif">{t('Report Finanziario Personale')}</span>
                   <span className="font-semibold">Sezione 7 · {todayStr}</span>
                 </div>
 
@@ -6345,12 +6474,12 @@ export default function PersonalFinanceDashboard() {
                   </h3>
                   
                   <p className="text-[8.5px] text-slate-500 mb-4 leading-relaxed">
-                    Metriche e indicatori calcolati in base allo storico degli snapshot caricati ed alle preferenze registrate nel sistema. Fornisce un'analisi sull'efficienza di accumulo e sul tasso di aderenza al benchmark finanziario.
+                    {t("Metriche e indicatori calcolati in base allo storico degli snapshot caricati ed alle preferenze registrate nel sistema. Fornisce un'analisi sull'efficienza di accumulo e sul tasso di aderenza al benchmark finanziario.")}
                   </p>
 
                   <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
                     <div className="bg-slate-50 border border-slate-200/60 rounded-xl p-3.5 text-center">
-                      <span className="text-[7.5px] font-bold text-slate-500 uppercase tracking-wider block">Tasso di Risparmio</span>
+                      <span className="text-[7.5px] font-bold text-slate-500 uppercase tracking-wider block">{t('Tasso di Risparmio')}</span>
                       <div className="pdf-serif text-lg font-black text-blue-700 mt-1 tabular-nums">
                         {savingsRate > 0 ? `${savingsRate.toFixed(1)}%` : `${(((config.pac.monthlyAmount + config.fonte.monthlyContribution) / (avgIncome || 1)) * 100).toFixed(1)}%*`}
                       </div>
@@ -6358,59 +6487,59 @@ export default function PersonalFinanceDashboard() {
                     </div>
 
                     <div className="bg-slate-50 border border-slate-200/60 rounded-xl p-3.5 text-center">
-                      <span className="text-[7.5px] font-bold text-slate-500 uppercase tracking-wider block">Crescita Storica (CAGR)</span>
+                      <span className="text-[7.5px] font-bold text-slate-500 uppercase tracking-wider block">{t('Crescita Storica (CAGR)')}</span>
                       <div className="pdf-serif text-lg font-black text-emerald-700 mt-1 tabular-nums">
                         {annualGrowthPct > 0 ? `${annualGrowthPct.toFixed(2)}%` : 'Attesa dati'}
                       </div>
-                      <p className="text-[7.5px] text-slate-400 mt-0.5">{annualGrowthPct > 0 ? 'Tasso annuo composto' : 'In attesa di storico'}</p>
+                      <p className="text-[7.5px] text-slate-400 mt-0.5">{annualGrowthPct > 0 ? t('Tasso annuo composto') : t('In attesa di storico')}</p>
                     </div>
 
                     <div className="bg-slate-50 border border-slate-200/60 rounded-xl p-3.5 text-center">
-                      <span className="text-[7.5px] font-bold text-slate-500 uppercase tracking-wider block">Scostamento Traiettoria</span>
+                      <span className="text-[7.5px] font-bold text-slate-500 uppercase tracking-wider block">{t('Scostamento Traiettoria')}</span>
                       <div className="pdf-serif text-lg font-black text-[#c9a84c] mt-1 tabular-nums">
                         {currentDelta !== 0 ? `${currentDelta > 0 ? '+' : ''}${fmt(currentDelta)}` : 'In linea'}
                       </div>
-                      <p className="text-[7.5px] text-slate-400 mt-0.5">Vs benchmark 5.3% annuo</p>
+                      <p className="text-[7.5px] text-slate-400 mt-0.5">{t('Vs benchmark 5.3% annuo')}</p>
                     </div>
 
                     <div className="bg-slate-50 border border-slate-200/60 rounded-xl p-3.5 text-center">
-                      <span className="text-[7.5px] font-bold text-slate-500 uppercase tracking-wider block">TER Medio Ponderato</span>
+                      <span className="text-[7.5px] font-bold text-slate-500 uppercase tracking-wider block">{t('TER Medio Ponderato')}</span>
                       <div className="pdf-serif text-lg font-black text-rose-600 mt-1 tabular-nums">
                         {weightedTer.toFixed(2)}%
                       </div>
-                      <p className="text-[7.5px] text-slate-400 mt-0.5">Efficienza costi strumenti</p>
+                      <p className="text-[7.5px] text-slate-400 mt-0.5">{t('Efficienza costi strumenti')}</p>
                     </div>
                   </div>
 
                   <div className="space-y-3.5">
-                    <h4 className="text-[10px] font-bold text-[#0f1923] uppercase tracking-wider">Glossario ed Efficienza delle Metriche</h4>
+                    <h4 className="text-[10px] font-bold text-[#0f1923] uppercase tracking-wider">{t('Glossario ed Efficienza delle Metriche')}</h4>
                     
                     <div className="bg-slate-50 border border-slate-100 rounded-xl p-3.5 text-xs space-y-2">
                       <div className="flex items-start gap-2">
-                        <span className="text-blue-600 font-bold block min-w-[130px]">Tasso di Risparmio:</span>
+                        <span className="text-blue-600 font-bold block min-w-[130px]">{t('Tasso di Risparmio:')}</span>
                         <span className="text-slate-600 leading-normal text-[8.5px]">
-                          Esprime l'efficienza nel convertire le entrate nette correnti in ricchezza accumulata o investita. Più questa metrica è elevata, minore è la dipendenza dal reddito da lavoro e più rapida è la transizione verso il Coast FIRE o il FIRE totale.
+                          {t("Esprime l'efficienza nel convertire le entrate nette correnti in ricchezza accumulata o investita. Più questa metrica è elevata, minore è la dipendenza dal reddito da lavoro e più rapida è la transizione verso il Coast FIRE o il FIRE totale.")}
                         </span>
                       </div>
                       
                       <div className="flex items-start gap-2 border-t border-slate-200/60 pt-2">
-                        <span className="text-emerald-600 font-bold block min-w-[130px]">Crescita Annuale (CAGR):</span>
+                        <span className="text-emerald-600 font-bold block min-w-[130px]">{t('Crescita Annuale (CAGR):')}</span>
                         <span className="text-slate-600 leading-normal text-[8.5px]">
-                          Rappresenta la crescita geometrica annualizzata del patrimonio complessivo al netto dei flussi in ingresso. Valuta l'effettivo "motore dell'interesse composto" e l'efficienza allocativa tra ETF e il fondo previdenziale {config.fonte.name || 'Pensione'}.
+                          {t('Rappresenta la crescita geometrica annualizzata del patrimonio complessivo al netto dei flussi in ingresso. Valuta l\'effettivo "motore dell\'interesse composto" e l\'efficienza allocativa tra ETF e il fondo previdenziale {fund}.', { fund: config.fonte.name || 'Pensione' })}
                         </span>
                       </div>
 
                       <div className="flex items-start gap-2 border-t border-slate-200/60 pt-2">
-                        <span className="text-[#c9a84c] font-bold block min-w-[130px]">Aderenza al Benchmark:</span>
+                        <span className="text-[#c9a84c] font-bold block min-w-[130px]">{t('Aderenza al Benchmark:')}</span>
                         <span className="text-slate-600 leading-normal text-[8.5px]">
-                          Compara l'evoluzione storica del patrimonio netto contro una traiettoria teorica programmata con rendimento medio del 5.3% annuo reale. Mantenere uno scostamento positivo garantisce di raggiungere gli obiettivi con largo anticipo rispetto ai piani.
+                          {t("Compara l'evoluzione storica del patrimonio netto contro una traiettoria teorica programmata con rendimento medio del 5.3% annuo reale. Mantenere uno scostamento positivo garantisce di raggiungere gli obiettivi con largo anticipo rispetto ai piani.")}
                         </span>
                       </div>
 
                       <div className="flex items-start gap-2 border-t border-slate-200/60 pt-2">
-                        <span className="text-rose-600 font-bold block min-w-[130px]">Costo dei Prodotti (TER):</span>
+                        <span className="text-rose-600 font-bold block min-w-[130px]">{t('Costo dei Prodotti (TER):')}</span>
                         <span className="text-slate-600 leading-normal text-[8.5px]">
-                          Un indicatore cruciale sul lungo periodo. I costi del portafoglio PAC attuale si attestano su livelli di assoluta eccellenza (pari a circa il {weightedTer.toFixed(2)}%), garantendo la minima dispersione dei rendimenti composti rispetto alla borsa mondiale.
+                          {t('Un indicatore cruciale sul lungo periodo. I costi del portafoglio PAC attuale si attestano su livelli di assoluta eccellenza (pari a circa il {ter}%), garantendo la minima dispersione dei rendimenti composti rispetto alla borsa mondiale.', { ter: weightedTer.toFixed(2) })}
                         </span>
                       </div>
                     </div>
@@ -6421,7 +6550,7 @@ export default function PersonalFinanceDashboard() {
               {/* Footer */}
               <div className="pdf-footer">
                 <span className="pdf-sans font-medium uppercase tracking-wider text-[7px] text-slate-400">Generato da: {config.profile.name || 'Utente'} · {todayStr}</span>
-                <span className="pdf-sans font-bold text-slate-800">Pagina 5 di 5</span>
+                <span className="pdf-sans font-bold text-slate-800">{t('Pagina 5 di 5')}</span>
               </div>
             </div>
 

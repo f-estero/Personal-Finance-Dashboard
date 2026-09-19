@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { supabase, storage } from './supabase'
 import type { Session } from '@supabase/supabase-js'
 import PersonalFinanceDashboard from './PersonalFinanceDashboard'
 import PrivacyPolicy from './PrivacyPolicy'
+import { makeT, detectBrowserLang } from './i18n'
 import { Wallet, Lock, Mail, Loader2, Eye, EyeOff, UserPlus, ArrowLeft, CheckCircle2 } from 'lucide-react'
 
 ;(window as any).storage = storage
@@ -10,6 +11,9 @@ import { Wallet, Lock, Mail, Loader2, Eye, EyeOff, UserPlus, ArrowLeft, CheckCir
 type Screen = 'login' | 'signup' | 'forgot' | 'reset' | 'check-email'
 
 export default function App() {
+  // Schermata pre-login: nessuna config utente disponibile, si usa la lingua del browser.
+  const t = useMemo(() => makeT(detectBrowserLang()), [])
+
   const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(true)
   const [screen, setScreen] = useState<Screen>('login')
@@ -52,13 +56,13 @@ export default function App() {
     e.preventDefault(); setBusy(true); setError('')
     const { error: err } = await supabase.auth.signInWithPassword({ email, password })
     setBusy(false)
-    if (err) setError('Email o password errati')
+    if (err) setError(t('Email o password errati'))
   }
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault(); setBusy(true); setError('')
-    if (password !== confirmPw) { setError('Le password non coincidono'); setBusy(false); return }
-    if (password.length < 8) { setError('Password minima 8 caratteri'); setBusy(false); return }
+    if (password !== confirmPw) { setError(t('Le password non coincidono')); setBusy(false); return }
+    if (password.length < 8) { setError(t('Password minima 8 caratteri')); setBusy(false); return }
     const { error: err } = await supabase.auth.signUp({
       email, password,
       options: { emailRedirectTo: window.location.origin }
@@ -80,8 +84,8 @@ export default function App() {
 
   const handleReset = async (e: React.FormEvent) => {
     e.preventDefault(); setBusy(true); setError('')
-    if (password !== confirmPw) { setError('Le password non coincidono'); setBusy(false); return }
-    if (password.length < 8) { setError('Password minima 8 caratteri'); setBusy(false); return }
+    if (password !== confirmPw) { setError(t('Le password non coincidono')); setBusy(false); return }
+    if (password.length < 8) { setError(t('Password minima 8 caratteri')); setBusy(false); return }
     const { error: err } = await supabase.auth.updateUser({ password })
     setBusy(false)
     if (err) setError(err.message)
@@ -113,21 +117,21 @@ export default function App() {
           </div>
           <div>
             <h1 className="text-base font-semibold text-slate-900">Finance Personal Dashboard</h1>
-            <p className="text-xs text-slate-500">Dashboard privata</p>
+            <p className="text-xs text-slate-500">{t('Dashboard privata')}</p>
           </div>
         </div>
 
         {screen === 'login' && (
           <form onSubmit={handleLogin} className="space-y-4">
-            <h2 className="text-sm font-semibold text-slate-800 mb-4">Accedi</h2>
+            <h2 className="text-sm font-semibold text-slate-800 mb-4">{t('Accedi')}</h2>
             <div>
-              <label className="text-xs font-medium text-slate-700 block mb-1.5">Email</label>
+              <label className="text-xs font-medium text-slate-700 block mb-1.5">{t('Email')}</label>
               <input type="email" required value={email} onChange={e => setEmail(e.target.value)}
-                placeholder="nome@email.com"
+                placeholder={t('nome@email.com')}
                 className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white" />
             </div>
             <div>
-              <label className="text-xs font-medium text-slate-700 block mb-1.5">Password</label>
+              <label className="text-xs font-medium text-slate-700 block mb-1.5">{t('Password')}</label>
               <div className="relative">
                 <input type={showPw ? 'text' : 'password'} required value={password} onChange={e => setPassword(e.target.value)}
                   placeholder="••••••••••"
@@ -142,14 +146,14 @@ export default function App() {
             <button type="submit" disabled={busy}
               className="w-full py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-60 flex items-center justify-center gap-2">
               {busy ? <Loader2 size={15} className="animate-spin" /> : <Lock size={15} />}
-              {busy ? 'Accesso...' : 'Accedi'}
+              {busy ? t('Accesso...') : t('Accedi')}
             </button>
             <div className="flex items-center justify-between pt-1 text-xs text-slate-500">
               <button type="button" onClick={() => { reset(); setScreen('forgot') }}
-                className="hover:text-slate-800 underline underline-offset-2">Password dimenticata?</button>
+                className="hover:text-slate-800 underline underline-offset-2">{t('Password dimenticata?')}</button>
               <button type="button" onClick={() => { reset(); setScreen('signup') }}
                 className="hover:text-slate-800 flex items-center gap-1">
-                <UserPlus size={12} />Registrati
+                <UserPlus size={12} />{t('Registrati')}
               </button>
             </div>
           </form>
@@ -159,22 +163,22 @@ export default function App() {
           <form onSubmit={handleSignup} className="space-y-4">
             <div className="flex items-center gap-2 mb-4">
               <button type="button" onClick={() => { reset(); setScreen('login') }} className="text-slate-400 hover:text-slate-700"><ArrowLeft size={16} /></button>
-              <h2 className="text-sm font-semibold text-slate-800">Crea account</h2>
+              <h2 className="text-sm font-semibold text-slate-800">{t('Crea account')}</h2>
             </div>
             <div>
-              <label className="text-xs font-medium text-slate-700 block mb-1.5">Email</label>
+              <label className="text-xs font-medium text-slate-700 block mb-1.5">{t('Email')}</label>
               <input type="email" required value={email} onChange={e => setEmail(e.target.value)}
-                placeholder="nome@email.com"
+                placeholder={t('nome@email.com')}
                 className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white" />
             </div>
             <div>
-              <label className="text-xs font-medium text-slate-700 block mb-1.5">Password</label>
+              <label className="text-xs font-medium text-slate-700 block mb-1.5">{t('Password')}</label>
               <input type="password" required value={password} onChange={e => setPassword(e.target.value)}
-                placeholder="min. 8 caratteri"
+                placeholder={t('min. 8 caratteri')}
                 className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white" />
             </div>
             <div>
-              <label className="text-xs font-medium text-slate-700 block mb-1.5">Conferma password</label>
+              <label className="text-xs font-medium text-slate-700 block mb-1.5">{t('Conferma password')}</label>
               <input type="password" required value={confirmPw} onChange={e => setConfirmPw(e.target.value)}
                 placeholder="••••••••••"
                 className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white" />
@@ -184,19 +188,19 @@ export default function App() {
                 onChange={e => setPrivacyAccepted(e.target.checked)}
                 className="mt-0.5 accent-emerald-600 flex-shrink-0" />
               <label htmlFor="privacy" className="text-xs text-slate-600">
-                Ho letto e accetto la{' '}
+                {t('Ho letto e accetto la')}{' '}
                 <button type="button" onClick={() => setShowPrivacy(true)}
                   className="text-emerald-600 hover:underline font-medium">
-                  Privacy Policy
+                  {t('Privacy Policy')}
                 </button>
-                . Comprendo che i miei dati finanziari sono memorizzati in cloud.
+                {'. '}{t('Comprendo che i miei dati finanziari sono memorizzati in cloud.')}
               </label>
             </div>
             {error && <p className="text-xs text-rose-600 font-medium">{error}</p>}
             <button type="submit" disabled={busy || !privacyAccepted}
               className="w-full py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-60 flex items-center justify-center gap-2">
               {busy ? <Loader2 size={15} className="animate-spin" /> : <UserPlus size={15} />}
-              {busy ? 'Registrazione...' : 'Crea account'}
+              {busy ? t('Registrazione...') : t('Crea account')}
             </button>
           </form>
         )}
@@ -205,20 +209,20 @@ export default function App() {
           <form onSubmit={handleForgot} className="space-y-4">
             <div className="flex items-center gap-2 mb-4">
               <button type="button" onClick={() => { reset(); setScreen('login') }} className="text-slate-400 hover:text-slate-700"><ArrowLeft size={16} /></button>
-              <h2 className="text-sm font-semibold text-slate-800">Reset password</h2>
+              <h2 className="text-sm font-semibold text-slate-800">{t('Reset password')}</h2>
             </div>
-            <p className="text-xs text-slate-500">Inserisci la tua email — ti mandiamo un link per reimpostare la password.</p>
+            <p className="text-xs text-slate-500">{t('Inserisci la tua email — ti mandiamo un link per reimpostare la password.')}</p>
             <div>
-              <label className="text-xs font-medium text-slate-700 block mb-1.5">Email</label>
+              <label className="text-xs font-medium text-slate-700 block mb-1.5">{t('Email')}</label>
               <input type="email" required value={email} onChange={e => setEmail(e.target.value)}
-                placeholder="nome@email.com"
+                placeholder={t('nome@email.com')}
                 className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white" />
             </div>
             {error && <p className="text-xs text-rose-600 font-medium">{error}</p>}
             <button type="submit" disabled={busy}
               className="w-full py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-60 flex items-center justify-center gap-2">
               {busy ? <Loader2 size={15} className="animate-spin" /> : <Mail size={15} />}
-              {busy ? 'Invio...' : 'Invia link reset'}
+              {busy ? t('Invio...') : t('Invia link reset')}
             </button>
           </form>
         )}
@@ -228,11 +232,11 @@ export default function App() {
             <div className="w-12 h-12 bg-emerald-100 rounded-full flex items-center justify-center mx-auto">
               <CheckCircle2 size={24} className="text-emerald-700" />
             </div>
-            <p className="text-sm font-semibold text-slate-900">Controlla la tua email</p>
-            <p className="text-xs text-slate-500">Abbiamo inviato un link a <strong>{info}</strong>.</p>
+            <p className="text-sm font-semibold text-slate-900">{t('Controlla la tua email')}</p>
+            <p className="text-xs text-slate-500">{t('Abbiamo inviato un link a')} <strong>{info}</strong>.</p>
             <button onClick={() => { reset(); setScreen('login') }}
               className="text-xs text-emerald-600 hover:underline flex items-center gap-1 mx-auto mt-2">
-              <ArrowLeft size={12} />Torna al login
+              <ArrowLeft size={12} />{t('Torna al login')}
             </button>
           </div>
         )}
@@ -241,23 +245,23 @@ export default function App() {
         {(screen === 'login' || screen === 'signup') && (
           <p className="text-[11px] text-slate-400 text-center mt-4">
             <button onClick={() => setShowPrivacy(true)} className="hover:text-emerald-600 hover:underline">
-              Privacy Policy
+              {t('Privacy Policy')}
             </button>
-            {' · '}I tuoi dati sono protetti e cifrati
+            {' · '}{t('I tuoi dati sono protetti e cifrati')}
           </p>
         )}
 
         {screen === 'reset' && (
           <form onSubmit={handleReset} className="space-y-4">
-            <h2 className="text-sm font-semibold text-slate-800 mb-4">Nuova password</h2>
+            <h2 className="text-sm font-semibold text-slate-800 mb-4">{t('Nuova password')}</h2>
             <div>
-              <label className="text-xs font-medium text-slate-700 block mb-1.5">Nuova password</label>
+              <label className="text-xs font-medium text-slate-700 block mb-1.5">{t('Nuova password')}</label>
               <input type="password" required value={password} onChange={e => setPassword(e.target.value)}
-                placeholder="min. 8 caratteri"
+                placeholder={t('min. 8 caratteri')}
                 className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white" />
             </div>
             <div>
-              <label className="text-xs font-medium text-slate-700 block mb-1.5">Conferma password</label>
+              <label className="text-xs font-medium text-slate-700 block mb-1.5">{t('Conferma password')}</label>
               <input type="password" required value={confirmPw} onChange={e => setConfirmPw(e.target.value)}
                 placeholder="••••••••••"
                 className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-300 bg-white" />
@@ -266,7 +270,7 @@ export default function App() {
             <button type="submit" disabled={busy}
               className="w-full py-2 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 disabled:opacity-60 flex items-center justify-center gap-2">
               {busy ? <Loader2 size={15} className="animate-spin" /> : <Lock size={15} />}
-              {busy ? 'Salvataggio...' : 'Salva nuova password'}
+              {busy ? t('Salvataggio...') : t('Salva nuova password')}
             </button>
           </form>
         )}
