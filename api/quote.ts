@@ -17,9 +17,13 @@ function cleanRateLimitMap() {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // A1. Rate Limiting in-memory per IP
+  // A1. Rate Limiting in-memory per IP (protetto da spoofing di x-forwarded-for)
   cleanRateLimitMap();
-  const ip = ((req.headers['x-forwarded-for'] as string) || (req.headers['x-real-ip'] as string) || 'anonymous').split(',')[0].trim();
+  const rawXff = (req.headers['x-vercel-forwarded-for'] as string) || (req.headers['x-forwarded-for'] as string) || '';
+  const xffIps = rawXff ? rawXff.split(',').map(s => s.trim()).filter(Boolean) : [];
+  // Su Vercel e reverse proxy l'ultimo IP inserito dal proxy di confine è quello affidabile
+  const clientIp = (req.headers['x-real-ip'] as string) || (xffIps.length > 0 ? xffIps[xffIps.length - 1] : '') || 'anonymous';
+  const ip = clientIp.trim();
   const now = Date.now();
   const limit = 30;
   const windowMs = 60 * 1000;

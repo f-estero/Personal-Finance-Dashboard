@@ -1,14 +1,36 @@
 import { useEffect, useMemo, useState } from 'react'
-import { supabase, storage } from './supabase'
+import { supabase } from './supabase'
 import type { Session } from '@supabase/supabase-js'
 import PersonalFinanceDashboard from './PersonalFinanceDashboard'
 import PrivacyPolicy from './PrivacyPolicy'
-import { makeT, detectBrowserLang } from './i18n'
+import { makeT, detectBrowserLang, type TFunc } from './i18n'
 import { Wallet, Lock, Mail, Loader2, Eye, EyeOff, UserPlus, ArrowLeft, CheckCircle2 } from 'lucide-react'
 
-;(window as any).storage = storage
-
 type Screen = 'login' | 'signup' | 'forgot' | 'reset' | 'check-email'
+
+// Supabase distingue diversi motivi di fallimento del login, ma mostrarli tutti
+// come "password errata" innesca un circolo vizioso: l'utente riprova, supera il
+// limite di tentativi, e continua a vedere lo stesso messaggio sbagliato.
+function authErrorMessage(err: any, t: TFunc): string {
+  const code = String(err?.code ?? '')
+  const status = Number(err?.status ?? 0)
+  const msg = String(err?.message ?? '').toLowerCase()
+
+  if (status === 429 || code === 'over_request_rate_limit' || msg.includes('rate limit')) {
+    return t('Troppi tentativi ravvicinati. Aspetta qualche minuto prima di riprovare \u2014 la password potrebbe essere corretta.')
+  }
+  if (code === 'email_not_confirmed' || msg.includes('not confirmed')) {
+    return t('Account non ancora confermato. Apri la mail di conferma che ti abbiamo inviato.')
+  }
+  if (msg.includes('failed to fetch') || msg.includes('networkerror') || msg.includes('network request failed')) {
+    return t('Impossibile contattare il server. Controlla la connessione e riprova.')
+  }
+  if (code === 'invalid_credentials' || msg.includes('invalid login credentials')) {
+    return t('Email o password errati')
+  }
+  return err?.message || t('Email o password errati')
+}
+
 
 export default function App() {
   // Schermata pre-login: nessuna config utente disponibile, si usa la lingua del browser.
@@ -54,9 +76,12 @@ export default function App() {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault(); setBusy(true); setError('')
-    const { error: err } = await supabase.auth.signInWithPassword({ email, password })
+    const { error: err } = await supabase.auth.signInWithPassword({
+      email: email.trim().toLowerCase(),
+      password,
+    })
     setBusy(false)
-    if (err) setError(t('Email o password errati'))
+    if (err) setError(authErrorMessage(err, t))
   }
 
   const handleSignup = async (e: React.FormEvent) => {
@@ -64,7 +89,7 @@ export default function App() {
     if (password !== confirmPw) { setError(t('Le password non coincidono')); setBusy(false); return }
     if (password.length < 8) { setError(t('Password minima 8 caratteri')); setBusy(false); return }
     const { error: err } = await supabase.auth.signUp({
-      email, password,
+      email: email.trim().toLowerCase(), password,
       options: { emailRedirectTo: window.location.origin }
     })
     setBusy(false)
@@ -74,7 +99,7 @@ export default function App() {
 
   const handleForgot = async (e: React.FormEvent) => {
     e.preventDefault(); setBusy(true); setError('')
-    const { error: err } = await supabase.auth.resetPasswordForEmail(email, {
+    const { error: err } = await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
       redirectTo: `${window.location.origin}/#type=recovery`
     })
     setBusy(false)

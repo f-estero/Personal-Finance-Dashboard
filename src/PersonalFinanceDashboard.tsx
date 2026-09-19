@@ -286,6 +286,7 @@ function sanitizeObject(obj: any): any {
     const cleaned: any = {};
     for (const key in obj) {
       if (Object.prototype.hasOwnProperty.call(obj, key)) {
+        if (key === '__proto__' || key === 'constructor' || key === 'prototype') continue;
         cleaned[key] = sanitizeObject(obj[key]);
       }
     }

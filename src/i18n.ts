@@ -880,6 +880,13 @@ const EN: Record<string, string> = {
     'Accumulated contributions are tax deductible.',
   'I dati sono salvati in cloud su Supabase (EU-West, Londra). Puoi esportarli in formato JSON in qualsiasi momento.':
     'Your data is stored in the cloud on Supabase (EU-West, London). You can export it as JSON at any time.',
+  // ─── Errori di autenticazione ───
+  'Troppi tentativi ravvicinati. Aspetta qualche minuto prima di riprovare — la password potrebbe essere corretta.':
+    'Too many attempts in a row. Wait a few minutes before trying again — your password may well be correct.',
+  'Account non ancora confermato. Apri la mail di conferma che ti abbiamo inviato.':
+    'Account not confirmed yet. Open the confirmation email we sent you.',
+  'Impossibile contattare il server. Controlla la connessione e riprova.':
+    'Could not reach the server. Check your connection and try again.',
 };
 
 const MONTHS = {
