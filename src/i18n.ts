@@ -622,6 +622,13 @@ const EN: Record<string, string> = {
   'Email o password errati': 'Incorrect email or password',
   'Le password non coincidono': 'Passwords do not match',
   'Password minima 8 caratteri': 'Password must be at least 8 characters',
+  'Continua con Google': 'Continue with Google',
+  'oppure con email': 'or with email',
+  'Non hai ricevuto l\'email?': "Didn't receive the email?",
+  'Rinvia email di conferma': 'Resend confirmation email',
+  'Nuova email inviata! Controlla anche in Spam.': 'New email sent! Also check your Spam folder.',
+  'Per accedere è necessario confermare l\'indirizzo cliccando sul link ricevuto.': 'To sign in, you must confirm your email by clicking the received link.',
+  'Controlla anche nella cartella Spam o Posta Indesiderata.': 'Also check your Spam or Junk folder.',
 
   // ─── MarketTab.tsx ───
   'Mercati Finanziari': 'Financial markets',
