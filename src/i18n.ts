@@ -894,6 +894,8 @@ const EN: Record<string, string> = {
     'Account not confirmed yet. Open the confirmation email we sent you.',
   'Impossibile contattare il server. Controlla la connessione e riprova.':
     'Could not reach the server. Check your connection and try again.',
+  'Configurazione del server mancante (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY). Contatta l\'amministratore.':
+    'Server configuration missing (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY). Contact the administrator.',
 };
 
 const MONTHS = {

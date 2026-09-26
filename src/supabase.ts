@@ -10,6 +10,10 @@ if (!supabaseUrl || !supabaseAnonKey) {
   )
 }
 
+// false quando l'app è stata compilata senza le variabili Supabase: il login
+// non può funzionare e va detto chiaramente invece di simulare un errore di rete.
+export const supabaseConfigured = !!supabaseAnonKey && supabaseUrl.startsWith('http')
+
 const safeUrl = supabaseUrl && supabaseUrl.startsWith('http') ? supabaseUrl : 'https://dummy-url.supabase.co';
 const safeKey = supabaseAnonKey || 'dummy-key';
 

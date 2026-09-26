@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { supabase } from './supabase'
+import { supabase, supabaseConfigured } from './supabase'
 import type { Session } from '@supabase/supabase-js'
 import PersonalFinanceDashboard from './PersonalFinanceDashboard'
 import PrivacyPolicy from './PrivacyPolicy'
@@ -23,6 +23,9 @@ function authErrorMessage(err: any, t: TFunc): string {
     return t('Account non ancora confermato. Apri la mail di conferma che ti abbiamo inviato.')
   }
   if (msg.includes('failed to fetch') || msg.includes('networkerror') || msg.includes('network request failed')) {
+    if (!supabaseConfigured) {
+      return t('Configurazione del server mancante (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY). Contatta l\'amministratore.')
+    }
     return t('Impossibile contattare il server. Controlla la connessione e riprova.')
   }
   if (code === 'invalid_credentials' || msg.includes('invalid login credentials')) {

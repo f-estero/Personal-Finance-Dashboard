@@ -27,7 +27,21 @@ CREATE TRIGGER user_data_updated_at
 -- Row Level Security
 ALTER TABLE public.user_data ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY "select_own" ON public.user_data FOR SELECT USING (auth.uid() = user_id);
-CREATE POLICY "insert_own" ON public.user_data FOR INSERT WITH CHECK (auth.uid() = user_id);
-CREATE POLICY "update_own" ON public.user_data FOR UPDATE USING (auth.uid() = user_id);
-CREATE POLICY "delete_own" ON public.user_data FOR DELETE USING (auth.uid() = user_id);
+-- Una sola policy per azione, solo per utenti autenticati.
+-- (select auth.uid()) viene valutato una volta per query invece che per ogni riga.
+-- I DROP rendono lo script rieseguibile e rimuovono la vecchia policy duplicata.
+DROP POLICY IF EXISTS "Accesso solo ai propri dati" ON public.user_data;
+DROP POLICY IF EXISTS "select_own" ON public.user_data;
+DROP POLICY IF EXISTS "insert_own" ON public.user_data;
+DROP POLICY IF EXISTS "update_own" ON public.user_data;
+DROP POLICY IF EXISTS "delete_own" ON public.user_data;
+
+CREATE POLICY "select_own" ON public.user_data FOR SELECT TO authenticated
+  USING ((select auth.uid()) = user_id);
+CREATE POLICY "insert_own" ON public.user_data FOR INSERT TO authenticated
+  WITH CHECK ((select auth.uid()) = user_id);
+CREATE POLICY "update_own" ON public.user_data FOR UPDATE TO authenticated
+  USING ((select auth.uid()) = user_id)
+  WITH CHECK ((select auth.uid()) = user_id);
+CREATE POLICY "delete_own" ON public.user_data FOR DELETE TO authenticated
+  USING ((select auth.uid()) = user_id);
